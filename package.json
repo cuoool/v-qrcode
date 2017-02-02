@@ -1,13 +1,15 @@
 {
   "name": "v-qrcode",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "a qrcode component for vue",
   "main": "dist/v-qrcode.min.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "clean": "rm -rf dist",
     "example": "npm run build && webpack --config webpack.example.config.js",
-    "build": "npm run clean && webpack && cross-env NODE_ENV=production webpack"
+    "build": "npm run clean && webpack && cross-env NODE_ENV=production webpack",
+    "publish:patch": "npm run example && git add . && git commit -m 'pubpatch' && npm version patch && npm publish",
+    "publish:minor": "npm run example && git add . && git commit -m 'minor' && npm version minor && npm publish"
   },
   "author": "wxp201013@163.com",
   "license": "ISC",

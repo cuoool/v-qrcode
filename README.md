@@ -40,7 +40,7 @@ A QRCode Component For Vue 2
 
 ### Browser Globals
 
-The dist folder contains v-qrcode.js and v-qrcode.min.js with all components exported in the window.VQrcode object.
+The dist folder contains `v-qrcode.js` and `v-qrcode.min.js` with all components exported in the `window.VQrcode` object.
 
     <script src="path/to/vue.js"></script>
     <script src="path/to/v-qrcode.min.js"></script>
@@ -52,13 +52,13 @@ The dist folder contains v-qrcode.js and v-qrcode.min.js with all components exp
 
 prop      | type                 | default value | desc
 ----------| -------------------- | ------------- | -----
-`value`   | `string`             | '""'          | the string to generate QR Code
-`cls`     | `string`             | '""'          | the classname of wrapper
+`value`   | `string`             | `""`          | the string to generate QR Code
+`cls`     | `string`             | `""`          | the classname of wrapper
 `size`    | `number`             | `100`         | size of qrcode
 `level`   | `string`             | `"L"`         | level of qrcode (`L, Q, M, H`)
 `background` | `string`          | `"#fff"`      | background color
 `foreground` | `string`          | `"#000"`      | foreground color
 `mime` | `string`                | `"image/png"` | the mime type of image
 `padding` | `number`             | `0`           | the padding between qrcode and wrapper
-`type`    | `string`             | '"canvas"'    | the output type can be either `canvas` or `image`
+`type`    | `string`             | `"canvas"`    | the output type can be either `canvas` or `image`
 
