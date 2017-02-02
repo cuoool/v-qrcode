@@ -75,8 +75,8 @@
 /***/ function(module, exports, __webpack_require__) {
 
 	/* WEBPACK VAR INJECTION */(function(global) {/*!
-	 * Vue.js v2.1.4
-	 * (c) 2014-2016 Evan You
+	 * Vue.js v2.1.10
+	 * (c) 2014-2017 Evan You
 	 * Released under the MIT License.
 	 */
 	(function (global, factory) {
@@ -103,8 +103,8 @@
 	 * If the conversion fails, return original string.
 	 */
 	function toNumber (val) {
-	  var n = parseFloat(val, 10);
-	  return (n || n === 0) ? n : val
+	  var n = parseFloat(val);
+	  return isNaN(n) ? val : n
 	}
 
 	/**
@@ -162,14 +162,14 @@
 	 */
 	function cached (fn) {
 	  var cache = Object.create(null);
-	  return function cachedFn (str) {
+	  return (function cachedFn (str) {
 	    var hit = cache[str];
 	    return hit || (cache[str] = fn(str))
-	  }
+	  })
 	}
 
 	/**
-	 * Camelize a hyphen-delmited string.
+	 * Camelize a hyphen-delimited string.
 	 */
 	var camelizeRE = /-(\w)/g;
 	var camelize = cached(function (str) {
@@ -277,6 +277,11 @@
 	var no = function () { return false; };
 
 	/**
+	 * Return same value
+	 */
+	var identity = function (_) { return _; };
+
+	/**
 	 * Generate a static keys string from compiler modules.
 	 */
 	function genStaticKeys (modules) {
@@ -290,13 +295,15 @@
 	 * if they are plain objects, do they have the same shape?
 	 */
 	function looseEqual (a, b) {
-	  /* eslint-disable eqeqeq */
-	  return a == b || (
-	    isObject(a) && isObject(b)
-	      ? JSON.stringify(a) === JSON.stringify(b)
-	      : false
-	  )
-	  /* eslint-enable eqeqeq */
+	  var isObjectA = isObject(a);
+	  var isObjectB = isObject(b);
+	  if (isObjectA && isObjectB) {
+	    return JSON.stringify(a) === JSON.stringify(b)
+	  } else if (!isObjectA && !isObjectB) {
+	    return String(a) === String(b)
+	  } else {
+	    return false
+	  }
 	}
 
 	function looseIndexOf (arr, val) {
@@ -332,7 +339,7 @@
 	  /**
 	   * Ignore certain custom elements
 	   */
-	  ignoredElements: null,
+	  ignoredElements: [],
 
 	  /**
 	   * Custom user key aliases for v-on
@@ -355,6 +362,11 @@
 	   * Get the namespace of an element
 	   */
 	  getTagNamespace: noop,
+
+	  /**
+	   * Parse the real tag name for the specific platform.
+	   */
+	  parsePlatformTagName: identity,
 
 	  /**
 	   * Check if an attribute must be bound using property, e.g. value
@@ -565,10 +577,10 @@
 	      this.set = Object.create(null);
 	    }
 	    Set.prototype.has = function has (key) {
-	      return this.set[key] !== undefined
+	      return this.set[key] === true
 	    };
 	    Set.prototype.add = function add (key) {
-	      this.set[key] = 1;
+	      this.set[key] = true;
 	    };
 	    Set.prototype.clear = function clear () {
 	      this.set = Object.create(null);
@@ -786,9 +798,8 @@
 	/**
 	 * Augment an target Object or Array by defining
 	 * hidden properties.
-	 *
-	 * istanbul ignore next
 	 */
+	/* istanbul ignore next */
 	function copyAugment (target, src, keys) {
 	  for (var i = 0, l = keys.length; i < l; i++) {
 	    var key = keys[i];
@@ -801,7 +812,7 @@
 	 * returns the new observer if successfully observed,
 	 * or the existing observer if the value already has one.
 	 */
-	function observe (value) {
+	function observe (value, asRootData) {
 	  if (!isObject(value)) {
 	    return
 	  }
@@ -816,6 +827,9 @@
 	    !value._isVue
 	  ) {
 	    ob = new Observer(value);
+	  }
+	  if (asRootData && ob) {
+	    ob.vmCount++;
 	  }
 	  return ob
 	}
@@ -1254,11 +1268,14 @@
 	    return
 	  }
 	  var assets = options[type];
-	  var res = assets[id] ||
-	    // camelCase ID
-	    assets[camelize(id)] ||
-	    // Pascal Case ID
-	    assets[capitalize(camelize(id))];
+	  // check local registration variations first
+	  if (hasOwn(assets, id)) { return assets[id] }
+	  var camelizedId = camelize(id);
+	  if (hasOwn(assets, camelizedId)) { return assets[camelizedId] }
+	  var PascalCaseId = capitalize(camelizedId);
+	  if (hasOwn(assets, PascalCaseId)) { return assets[PascalCaseId] }
+	  // fallback to prototype chain
+	  var res = assets[id] || assets[camelizedId] || assets[PascalCaseId];
 	  if ("development" !== 'production' && warnMissing && !res) {
 	    warn(
 	      'Failed to resolve ' + type.slice(0, -1) + ': ' + id,
@@ -1280,10 +1297,10 @@
 	  var absent = !hasOwn(propsData, key);
 	  var value = propsData[key];
 	  // handle boolean props
-	  if (isBooleanType(prop.type)) {
+	  if (isType(Boolean, prop.type)) {
 	    if (absent && !hasOwn(prop, 'default')) {
 	      value = false;
-	    } else if (value === '' || value === hyphenate(key)) {
+	    } else if (!isType(String, prop.type) && (value === '' || value === hyphenate(key))) {
 	      value = true;
 	    }
 	  }
@@ -1363,7 +1380,7 @@
 	    }
 	    for (var i = 0; i < type.length && !valid; i++) {
 	      var assertedType = assertType(value, type[i]);
-	      expectedTypes.push(assertedType.expectedType);
+	      expectedTypes.push(assertedType.expectedType || '');
 	      valid = assertedType.valid;
 	    }
 	  }
@@ -1424,12 +1441,12 @@
 	  return match && match[1]
 	}
 
-	function isBooleanType (fn) {
+	function isType (type, fn) {
 	  if (!Array.isArray(fn)) {
-	    return getType(fn) === 'Boolean'
+	    return getType(fn) === getType(type)
 	  }
 	  for (var i = 0, len = fn.length; i < len; i++) {
-	    if (getType(fn[i]) === 'Boolean') {
+	    if (getType(fn[i]) === getType(type)) {
 	      return true
 	    }
 	  }
@@ -1460,6 +1477,7 @@
 		toObject: toObject,
 		noop: noop,
 		no: no,
+		identity: identity,
 		genStaticKeys: genStaticKeys,
 		looseEqual: looseEqual,
 		looseIndexOf: looseIndexOf,
@@ -1561,576 +1579,12 @@
 
 	/*  */
 
-
-	var queue = [];
-	var has$1 = {};
-	var circular = {};
-	var waiting = false;
-	var flushing = false;
-	var index = 0;
-
-	/**
-	 * Reset the scheduler's state.
-	 */
-	function resetSchedulerState () {
-	  queue.length = 0;
-	  has$1 = {};
-	  {
-	    circular = {};
-	  }
-	  waiting = flushing = false;
-	}
-
-	/**
-	 * Flush both queues and run the watchers.
-	 */
-	function flushSchedulerQueue () {
-	  flushing = true;
-
-	  // Sort queue before flush.
-	  // This ensures that:
-	  // 1. Components are updated from parent to child. (because parent is always
-	  //    created before the child)
-	  // 2. A component's user watchers are run before its render watcher (because
-	  //    user watchers are created before the render watcher)
-	  // 3. If a component is destroyed during a parent component's watcher run,
-	  //    its watchers can be skipped.
-	  queue.sort(function (a, b) { return a.id - b.id; });
-
-	  // do not cache length because more watchers might be pushed
-	  // as we run existing watchers
-	  for (index = 0; index < queue.length; index++) {
-	    var watcher = queue[index];
-	    var id = watcher.id;
-	    has$1[id] = null;
-	    watcher.run();
-	    // in dev build, check and stop circular updates.
-	    if ("development" !== 'production' && has$1[id] != null) {
-	      circular[id] = (circular[id] || 0) + 1;
-	      if (circular[id] > config._maxUpdateCount) {
-	        warn(
-	          'You may have an infinite update loop ' + (
-	            watcher.user
-	              ? ("in watcher with expression \"" + (watcher.expression) + "\"")
-	              : "in a component render function."
-	          ),
-	          watcher.vm
-	        );
-	        break
-	      }
-	    }
-	  }
-
-	  // devtool hook
-	  /* istanbul ignore if */
-	  if (devtools && config.devtools) {
-	    devtools.emit('flush');
-	  }
-
-	  resetSchedulerState();
-	}
-
-	/**
-	 * Push a watcher into the watcher queue.
-	 * Jobs with duplicate IDs will be skipped unless it's
-	 * pushed when the queue is being flushed.
-	 */
-	function queueWatcher (watcher) {
-	  var id = watcher.id;
-	  if (has$1[id] == null) {
-	    has$1[id] = true;
-	    if (!flushing) {
-	      queue.push(watcher);
-	    } else {
-	      // if already flushing, splice the watcher based on its id
-	      // if already past its id, it will be run next immediately.
-	      var i = queue.length - 1;
-	      while (i >= 0 && queue[i].id > watcher.id) {
-	        i--;
-	      }
-	      queue.splice(Math.max(i, index) + 1, 0, watcher);
-	    }
-	    // queue the flush
-	    if (!waiting) {
-	      waiting = true;
-	      nextTick(flushSchedulerQueue);
-	    }
-	  }
-	}
-
-	/*  */
-
-	var uid$2 = 0;
-
-	/**
-	 * A watcher parses an expression, collects dependencies,
-	 * and fires callback when the expression value changes.
-	 * This is used for both the $watch() api and directives.
-	 */
-	var Watcher = function Watcher (
-	  vm,
-	  expOrFn,
-	  cb,
-	  options
-	) {
-	  if ( options === void 0 ) options = {};
-
-	  this.vm = vm;
-	  vm._watchers.push(this);
-	  // options
-	  this.deep = !!options.deep;
-	  this.user = !!options.user;
-	  this.lazy = !!options.lazy;
-	  this.sync = !!options.sync;
-	  this.expression = expOrFn.toString();
-	  this.cb = cb;
-	  this.id = ++uid$2; // uid for batching
-	  this.active = true;
-	  this.dirty = this.lazy; // for lazy watchers
-	  this.deps = [];
-	  this.newDeps = [];
-	  this.depIds = new _Set();
-	  this.newDepIds = new _Set();
-	  // parse expression for getter
-	  if (typeof expOrFn === 'function') {
-	    this.getter = expOrFn;
-	  } else {
-	    this.getter = parsePath(expOrFn);
-	    if (!this.getter) {
-	      this.getter = function () {};
-	      "development" !== 'production' && warn(
-	        "Failed watching path: \"" + expOrFn + "\" " +
-	        'Watcher only accepts simple dot-delimited paths. ' +
-	        'For full control, use a function instead.',
-	        vm
-	      );
-	    }
-	  }
-	  this.value = this.lazy
-	    ? undefined
-	    : this.get();
-	};
-
-	/**
-	 * Evaluate the getter, and re-collect dependencies.
-	 */
-	Watcher.prototype.get = function get () {
-	  pushTarget(this);
-	  var value = this.getter.call(this.vm, this.vm);
-	  // "touch" every property so they are all tracked as
-	  // dependencies for deep watching
-	  if (this.deep) {
-	    traverse(value);
-	  }
-	  popTarget();
-	  this.cleanupDeps();
-	  return value
-	};
-
-	/**
-	 * Add a dependency to this directive.
-	 */
-	Watcher.prototype.addDep = function addDep (dep) {
-	  var id = dep.id;
-	  if (!this.newDepIds.has(id)) {
-	    this.newDepIds.add(id);
-	    this.newDeps.push(dep);
-	    if (!this.depIds.has(id)) {
-	      dep.addSub(this);
-	    }
-	  }
-	};
-
-	/**
-	 * Clean up for dependency collection.
-	 */
-	Watcher.prototype.cleanupDeps = function cleanupDeps () {
-	    var this$1 = this;
-
-	  var i = this.deps.length;
-	  while (i--) {
-	    var dep = this$1.deps[i];
-	    if (!this$1.newDepIds.has(dep.id)) {
-	      dep.removeSub(this$1);
-	    }
-	  }
-	  var tmp = this.depIds;
-	  this.depIds = this.newDepIds;
-	  this.newDepIds = tmp;
-	  this.newDepIds.clear();
-	  tmp = this.deps;
-	  this.deps = this.newDeps;
-	  this.newDeps = tmp;
-	  this.newDeps.length = 0;
-	};
-
-	/**
-	 * Subscriber interface.
-	 * Will be called when a dependency changes.
-	 */
-	Watcher.prototype.update = function update () {
-	  /* istanbul ignore else */
-	  if (this.lazy) {
-	    this.dirty = true;
-	  } else if (this.sync) {
-	    this.run();
-	  } else {
-	    queueWatcher(this);
-	  }
-	};
-
-	/**
-	 * Scheduler job interface.
-	 * Will be called by the scheduler.
-	 */
-	Watcher.prototype.run = function run () {
-	  if (this.active) {
-	    var value = this.get();
-	      if (
-	        value !== this.value ||
-	      // Deep watchers and watchers on Object/Arrays should fire even
-	      // when the value is the same, because the value may
-	      // have mutated.
-	      isObject(value) ||
-	      this.deep
-	    ) {
-	      // set new value
-	      var oldValue = this.value;
-	      this.value = value;
-	      if (this.user) {
-	        try {
-	          this.cb.call(this.vm, value, oldValue);
-	        } catch (e) {
-	          /* istanbul ignore else */
-	          if (config.errorHandler) {
-	            config.errorHandler.call(null, e, this.vm);
-	          } else {
-	            "development" !== 'production' && warn(
-	              ("Error in watcher \"" + (this.expression) + "\""),
-	              this.vm
-	            );
-	            throw e
-	          }
-	        }
-	      } else {
-	        this.cb.call(this.vm, value, oldValue);
-	      }
-	    }
-	  }
-	};
-
-	/**
-	 * Evaluate the value of the watcher.
-	 * This only gets called for lazy watchers.
-	 */
-	Watcher.prototype.evaluate = function evaluate () {
-	  this.value = this.get();
-	  this.dirty = false;
-	};
-
-	/**
-	 * Depend on all deps collected by this watcher.
-	 */
-	Watcher.prototype.depend = function depend () {
-	    var this$1 = this;
-
-	  var i = this.deps.length;
-	  while (i--) {
-	    this$1.deps[i].depend();
-	  }
-	};
-
-	/**
-	 * Remove self from all dependencies' subscriber list.
-	 */
-	Watcher.prototype.teardown = function teardown () {
-	    var this$1 = this;
-
-	  if (this.active) {
-	    // remove self from vm's watcher list
-	    // this is a somewhat expensive operation so we skip it
-	    // if the vm is being destroyed or is performing a v-for
-	    // re-render (the watcher list is then filtered by v-for).
-	    if (!this.vm._isBeingDestroyed && !this.vm._vForRemoving) {
-	      remove$1(this.vm._watchers, this);
-	    }
-	    var i = this.deps.length;
-	    while (i--) {
-	      this$1.deps[i].removeSub(this$1);
-	    }
-	    this.active = false;
-	  }
-	};
-
-	/**
-	 * Recursively traverse an object to evoke all converted
-	 * getters, so that every nested property inside the object
-	 * is collected as a "deep" dependency.
-	 */
-	var seenObjects = new _Set();
-	function traverse (val) {
-	  seenObjects.clear();
-	  _traverse(val, seenObjects);
-	}
-
-	function _traverse (val, seen) {
-	  var i, keys;
-	  var isA = Array.isArray(val);
-	  if ((!isA && !isObject(val)) || !Object.isExtensible(val)) {
-	    return
-	  }
-	  if (val.__ob__) {
-	    var depId = val.__ob__.dep.id;
-	    if (seen.has(depId)) {
-	      return
-	    }
-	    seen.add(depId);
-	  }
-	  if (isA) {
-	    i = val.length;
-	    while (i--) { _traverse(val[i], seen); }
-	  } else {
-	    keys = Object.keys(val);
-	    i = keys.length;
-	    while (i--) { _traverse(val[keys[i]], seen); }
-	  }
-	}
-
-	/*  */
-
-	function initState (vm) {
-	  vm._watchers = [];
-	  initProps(vm);
-	  initMethods(vm);
-	  initData(vm);
-	  initComputed(vm);
-	  initWatch(vm);
-	}
-
-	var isReservedProp = { key: 1, ref: 1, slot: 1 };
-
-	function initProps (vm) {
-	  var props = vm.$options.props;
-	  if (props) {
-	    var propsData = vm.$options.propsData || {};
-	    var keys = vm.$options._propKeys = Object.keys(props);
-	    var isRoot = !vm.$parent;
-	    // root instance props should be converted
-	    observerState.shouldConvert = isRoot;
-	    var loop = function ( i ) {
-	      var key = keys[i];
-	      /* istanbul ignore else */
-	      {
-	        if (isReservedProp[key]) {
-	          warn(
-	            ("\"" + key + "\" is a reserved attribute and cannot be used as component prop."),
-	            vm
-	          );
-	        }
-	        defineReactive$$1(vm, key, validateProp(key, props, propsData, vm), function () {
-	          if (vm.$parent && !observerState.isSettingProps) {
-	            warn(
-	              "Avoid mutating a prop directly since the value will be " +
-	              "overwritten whenever the parent component re-renders. " +
-	              "Instead, use a data or computed property based on the prop's " +
-	              "value. Prop being mutated: \"" + key + "\"",
-	              vm
-	            );
-	          }
-	        });
-	      }
-	    };
-
-	    for (var i = 0; i < keys.length; i++) loop( i );
-	    observerState.shouldConvert = true;
-	  }
-	}
-
-	function initData (vm) {
-	  var data = vm.$options.data;
-	  data = vm._data = typeof data === 'function'
-	    ? data.call(vm)
-	    : data || {};
-	  if (!isPlainObject(data)) {
-	    data = {};
-	    "development" !== 'production' && warn(
-	      'data functions should return an object.',
-	      vm
-	    );
-	  }
-	  // proxy data on instance
-	  var keys = Object.keys(data);
-	  var props = vm.$options.props;
-	  var i = keys.length;
-	  while (i--) {
-	    if (props && hasOwn(props, keys[i])) {
-	      "development" !== 'production' && warn(
-	        "The data property \"" + (keys[i]) + "\" is already declared as a prop. " +
-	        "Use prop default value instead.",
-	        vm
-	      );
-	    } else {
-	      proxy(vm, keys[i]);
-	    }
-	  }
-	  // observe data
-	  observe(data);
-	  data.__ob__ && data.__ob__.vmCount++;
-	}
-
-	var computedSharedDefinition = {
-	  enumerable: true,
-	  configurable: true,
-	  get: noop,
-	  set: noop
-	};
-
-	function initComputed (vm) {
-	  var computed = vm.$options.computed;
-	  if (computed) {
-	    for (var key in computed) {
-	      var userDef = computed[key];
-	      if (typeof userDef === 'function') {
-	        computedSharedDefinition.get = makeComputedGetter(userDef, vm);
-	        computedSharedDefinition.set = noop;
-	      } else {
-	        computedSharedDefinition.get = userDef.get
-	          ? userDef.cache !== false
-	            ? makeComputedGetter(userDef.get, vm)
-	            : bind$1(userDef.get, vm)
-	          : noop;
-	        computedSharedDefinition.set = userDef.set
-	          ? bind$1(userDef.set, vm)
-	          : noop;
-	      }
-	      Object.defineProperty(vm, key, computedSharedDefinition);
-	    }
-	  }
-	}
-
-	function makeComputedGetter (getter, owner) {
-	  var watcher = new Watcher(owner, getter, noop, {
-	    lazy: true
-	  });
-	  return function computedGetter () {
-	    if (watcher.dirty) {
-	      watcher.evaluate();
-	    }
-	    if (Dep.target) {
-	      watcher.depend();
-	    }
-	    return watcher.value
-	  }
-	}
-
-	function initMethods (vm) {
-	  var methods = vm.$options.methods;
-	  if (methods) {
-	    for (var key in methods) {
-	      vm[key] = methods[key] == null ? noop : bind$1(methods[key], vm);
-	      if ("development" !== 'production' && methods[key] == null) {
-	        warn(
-	          "method \"" + key + "\" has an undefined value in the component definition. " +
-	          "Did you reference the function correctly?",
-	          vm
-	        );
-	      }
-	    }
-	  }
-	}
-
-	function initWatch (vm) {
-	  var watch = vm.$options.watch;
-	  if (watch) {
-	    for (var key in watch) {
-	      var handler = watch[key];
-	      if (Array.isArray(handler)) {
-	        for (var i = 0; i < handler.length; i++) {
-	          createWatcher(vm, key, handler[i]);
-	        }
-	      } else {
-	        createWatcher(vm, key, handler);
-	      }
-	    }
-	  }
-	}
-
-	function createWatcher (vm, key, handler) {
-	  var options;
-	  if (isPlainObject(handler)) {
-	    options = handler;
-	    handler = handler.handler;
-	  }
-	  if (typeof handler === 'string') {
-	    handler = vm[handler];
-	  }
-	  vm.$watch(key, handler, options);
-	}
-
-	function stateMixin (Vue) {
-	  // flow somehow has problems with directly declared definition object
-	  // when using Object.defineProperty, so we have to procedurally build up
-	  // the object here.
-	  var dataDef = {};
-	  dataDef.get = function () {
-	    return this._data
-	  };
-	  {
-	    dataDef.set = function (newData) {
-	      warn(
-	        'Avoid replacing instance root $data. ' +
-	        'Use nested data properties instead.',
-	        this
-	      );
-	    };
-	  }
-	  Object.defineProperty(Vue.prototype, '$data', dataDef);
-
-	  Vue.prototype.$set = set$1;
-	  Vue.prototype.$delete = del;
-
-	  Vue.prototype.$watch = function (
-	    expOrFn,
-	    cb,
-	    options
-	  ) {
-	    var vm = this;
-	    options = options || {};
-	    options.user = true;
-	    var watcher = new Watcher(vm, expOrFn, cb, options);
-	    if (options.immediate) {
-	      cb.call(vm, watcher.value);
-	    }
-	    return function unwatchFn () {
-	      watcher.teardown();
-	    }
-	  };
-	}
-
-	function proxy (vm, key) {
-	  if (!isReserved(key)) {
-	    Object.defineProperty(vm, key, {
-	      configurable: true,
-	      enumerable: true,
-	      get: function proxyGetter () {
-	        return vm._data[key]
-	      },
-	      set: function proxySetter (val) {
-	        vm._data[key] = val;
-	      }
-	    });
-	  }
-	}
-
-	/*  */
-
 	var VNode = function VNode (
 	  tag,
 	  data,
 	  children,
 	  text,
 	  elm,
-	  ns,
 	  context,
 	  componentOptions
 	) {
@@ -2139,12 +1593,12 @@
 	  this.children = children;
 	  this.text = text;
 	  this.elm = elm;
-	  this.ns = ns;
+	  this.ns = undefined;
 	  this.context = context;
 	  this.functionalContext = undefined;
 	  this.key = data && data.key;
 	  this.componentOptions = componentOptions;
-	  this.child = undefined;
+	  this.componentInstance = undefined;
 	  this.parent = undefined;
 	  this.raw = false;
 	  this.isStatic = false;
@@ -2154,12 +1608,26 @@
 	  this.isOnce = false;
 	};
 
-	var emptyVNode = function () {
+	var prototypeAccessors = { child: {} };
+
+	// DEPRECATED: alias for componentInstance for backwards compat.
+	/* istanbul ignore next */
+	prototypeAccessors.child.get = function () {
+	  return this.componentInstance
+	};
+
+	Object.defineProperties( VNode.prototype, prototypeAccessors );
+
+	var createEmptyVNode = function () {
 	  var node = new VNode();
 	  node.text = '';
 	  node.isComment = true;
 	  return node
 	};
+
+	function createTextVNode (val) {
+	  return new VNode(undefined, undefined, undefined, String(val))
+	}
 
 	// optimized shallow clone
 	// used for static nodes and slot nodes because they may be reused across
@@ -2172,10 +1640,10 @@
 	    vnode.children,
 	    vnode.text,
 	    vnode.elm,
-	    vnode.ns,
 	    vnode.context,
 	    vnode.componentOptions
 	  );
+	  cloned.ns = vnode.ns;
 	  cloned.isStatic = vnode.isStatic;
 	  cloned.key = vnode.key;
 	  cloned.isCloned = true;
@@ -2188,376 +1656,6 @@
 	    res[i] = cloneVNode(vnodes[i]);
 	  }
 	  return res
-	}
-
-	/*  */
-
-	function mergeVNodeHook (def, hookKey, hook, key) {
-	  key = key + hookKey;
-	  var injectedHash = def.__injected || (def.__injected = {});
-	  if (!injectedHash[key]) {
-	    injectedHash[key] = true;
-	    var oldHook = def[hookKey];
-	    if (oldHook) {
-	      def[hookKey] = function () {
-	        oldHook.apply(this, arguments);
-	        hook.apply(this, arguments);
-	      };
-	    } else {
-	      def[hookKey] = hook;
-	    }
-	  }
-	}
-
-	/*  */
-
-	function updateListeners (
-	  on,
-	  oldOn,
-	  add,
-	  remove$$1,
-	  vm
-	) {
-	  var name, cur, old, fn, event, capture, once;
-	  for (name in on) {
-	    cur = on[name];
-	    old = oldOn[name];
-	    if (!cur) {
-	      "development" !== 'production' && warn(
-	        "Invalid handler for event \"" + name + "\": got " + String(cur),
-	        vm
-	      );
-	    } else if (!old) {
-	      once = name.charAt(0) === '~'; // Prefixed last, checked first
-	      event = once ? name.slice(1) : name;
-	      capture = event.charAt(0) === '!';
-	      event = capture ? event.slice(1) : event;
-	      if (Array.isArray(cur)) {
-	        add(event, (cur.invoker = arrInvoker(cur)), once, capture);
-	      } else {
-	        if (!cur.invoker) {
-	          fn = cur;
-	          cur = on[name] = {};
-	          cur.fn = fn;
-	          cur.invoker = fnInvoker(cur);
-	        }
-	        add(event, cur.invoker, once, capture);
-	      }
-	    } else if (cur !== old) {
-	      if (Array.isArray(old)) {
-	        old.length = cur.length;
-	        for (var i = 0; i < old.length; i++) { old[i] = cur[i]; }
-	        on[name] = old;
-	      } else {
-	        old.fn = cur;
-	        on[name] = old;
-	      }
-	    }
-	  }
-	  for (name in oldOn) {
-	    if (!on[name]) {
-	      once = name.charAt(0) === '~'; // Prefixed last, checked first
-	      event = once ? name.slice(1) : name;
-	      capture = event.charAt(0) === '!';
-	      event = capture ? event.slice(1) : event;
-	      remove$$1(event, oldOn[name].invoker, capture);
-	    }
-	  }
-	}
-
-	function arrInvoker (arr) {
-	  return function (ev) {
-	    var arguments$1 = arguments;
-
-	    var single = arguments.length === 1;
-	    for (var i = 0; i < arr.length; i++) {
-	      single ? arr[i](ev) : arr[i].apply(null, arguments$1);
-	    }
-	  }
-	}
-
-	function fnInvoker (o) {
-	  return function (ev) {
-	    var single = arguments.length === 1;
-	    single ? o.fn(ev) : o.fn.apply(null, arguments);
-	  }
-	}
-
-	/*  */
-
-	function normalizeChildren (
-	  children,
-	  ns,
-	  nestedIndex
-	) {
-	  if (isPrimitive(children)) {
-	    return [createTextVNode(children)]
-	  }
-	  if (Array.isArray(children)) {
-	    var res = [];
-	    for (var i = 0, l = children.length; i < l; i++) {
-	      var c = children[i];
-	      var last = res[res.length - 1];
-	      //  nested
-	      if (Array.isArray(c)) {
-	        res.push.apply(res, normalizeChildren(c, ns, ((nestedIndex || '') + "_" + i)));
-	      } else if (isPrimitive(c)) {
-	        if (last && last.text) {
-	          last.text += String(c);
-	        } else if (c !== '') {
-	          // convert primitive to vnode
-	          res.push(createTextVNode(c));
-	        }
-	      } else if (c instanceof VNode) {
-	        if (c.text && last && last.text) {
-	          if (!last.isCloned) {
-	            last.text += c.text;
-	          }
-	        } else {
-	          // inherit parent namespace
-	          if (ns) {
-	            applyNS(c, ns);
-	          }
-	          // default key for nested array children (likely generated by v-for)
-	          if (c.tag && c.key == null && nestedIndex != null) {
-	            c.key = "__vlist" + nestedIndex + "_" + i + "__";
-	          }
-	          res.push(c);
-	        }
-	      }
-	    }
-	    return res
-	  }
-	}
-
-	function createTextVNode (val) {
-	  return new VNode(undefined, undefined, undefined, String(val))
-	}
-
-	function applyNS (vnode, ns) {
-	  if (vnode.tag && !vnode.ns) {
-	    vnode.ns = ns;
-	    if (vnode.children) {
-	      for (var i = 0, l = vnode.children.length; i < l; i++) {
-	        applyNS(vnode.children[i], ns);
-	      }
-	    }
-	  }
-	}
-
-	/*  */
-
-	function getFirstComponentChild (children) {
-	  return children && children.filter(function (c) { return c && c.componentOptions; })[0]
-	}
-
-	/*  */
-
-	var activeInstance = null;
-
-	function initLifecycle (vm) {
-	  var options = vm.$options;
-
-	  // locate first non-abstract parent
-	  var parent = options.parent;
-	  if (parent && !options.abstract) {
-	    while (parent.$options.abstract && parent.$parent) {
-	      parent = parent.$parent;
-	    }
-	    parent.$children.push(vm);
-	  }
-
-	  vm.$parent = parent;
-	  vm.$root = parent ? parent.$root : vm;
-
-	  vm.$children = [];
-	  vm.$refs = {};
-
-	  vm._watcher = null;
-	  vm._inactive = false;
-	  vm._isMounted = false;
-	  vm._isDestroyed = false;
-	  vm._isBeingDestroyed = false;
-	}
-
-	function lifecycleMixin (Vue) {
-	  Vue.prototype._mount = function (
-	    el,
-	    hydrating
-	  ) {
-	    var vm = this;
-	    vm.$el = el;
-	    if (!vm.$options.render) {
-	      vm.$options.render = emptyVNode;
-	      {
-	        /* istanbul ignore if */
-	        if (vm.$options.template && vm.$options.template.charAt(0) !== '#') {
-	          warn(
-	            'You are using the runtime-only build of Vue where the template ' +
-	            'option is not available. Either pre-compile the templates into ' +
-	            'render functions, or use the compiler-included build.',
-	            vm
-	          );
-	        } else {
-	          warn(
-	            'Failed to mount component: template or render function not defined.',
-	            vm
-	          );
-	        }
-	      }
-	    }
-	    callHook(vm, 'beforeMount');
-	    vm._watcher = new Watcher(vm, function () {
-	      vm._update(vm._render(), hydrating);
-	    }, noop);
-	    hydrating = false;
-	    // manually mounted instance, call mounted on self
-	    // mounted is called for render-created child components in its inserted hook
-	    if (vm.$vnode == null) {
-	      vm._isMounted = true;
-	      callHook(vm, 'mounted');
-	    }
-	    return vm
-	  };
-
-	  Vue.prototype._update = function (vnode, hydrating) {
-	    var vm = this;
-	    if (vm._isMounted) {
-	      callHook(vm, 'beforeUpdate');
-	    }
-	    var prevEl = vm.$el;
-	    var prevVnode = vm._vnode;
-	    var prevActiveInstance = activeInstance;
-	    activeInstance = vm;
-	    vm._vnode = vnode;
-	    // Vue.prototype.__patch__ is injected in entry points
-	    // based on the rendering backend used.
-	    if (!prevVnode) {
-	      // initial render
-	      vm.$el = vm.__patch__(
-	        vm.$el, vnode, hydrating, false /* removeOnly */,
-	        vm.$options._parentElm,
-	        vm.$options._refElm
-	      );
-	    } else {
-	      // updates
-	      vm.$el = vm.__patch__(prevVnode, vnode);
-	    }
-	    activeInstance = prevActiveInstance;
-	    // update __vue__ reference
-	    if (prevEl) {
-	      prevEl.__vue__ = null;
-	    }
-	    if (vm.$el) {
-	      vm.$el.__vue__ = vm;
-	    }
-	    // if parent is an HOC, update its $el as well
-	    if (vm.$vnode && vm.$parent && vm.$vnode === vm.$parent._vnode) {
-	      vm.$parent.$el = vm.$el;
-	    }
-	    if (vm._isMounted) {
-	      callHook(vm, 'updated');
-	    }
-	  };
-
-	  Vue.prototype._updateFromParent = function (
-	    propsData,
-	    listeners,
-	    parentVnode,
-	    renderChildren
-	  ) {
-	    var vm = this;
-	    var hasChildren = !!(vm.$options._renderChildren || renderChildren);
-	    vm.$options._parentVnode = parentVnode;
-	    vm.$vnode = parentVnode; // update vm's placeholder node without re-render
-	    if (vm._vnode) { // update child tree's parent
-	      vm._vnode.parent = parentVnode;
-	    }
-	    vm.$options._renderChildren = renderChildren;
-	    // update props
-	    if (propsData && vm.$options.props) {
-	      observerState.shouldConvert = false;
-	      {
-	        observerState.isSettingProps = true;
-	      }
-	      var propKeys = vm.$options._propKeys || [];
-	      for (var i = 0; i < propKeys.length; i++) {
-	        var key = propKeys[i];
-	        vm[key] = validateProp(key, vm.$options.props, propsData, vm);
-	      }
-	      observerState.shouldConvert = true;
-	      {
-	        observerState.isSettingProps = false;
-	      }
-	      vm.$options.propsData = propsData;
-	    }
-	    // update listeners
-	    if (listeners) {
-	      var oldListeners = vm.$options._parentListeners;
-	      vm.$options._parentListeners = listeners;
-	      vm._updateListeners(listeners, oldListeners);
-	    }
-	    // resolve slots + force update if has children
-	    if (hasChildren) {
-	      vm.$slots = resolveSlots(renderChildren, parentVnode.context);
-	      vm.$forceUpdate();
-	    }
-	  };
-
-	  Vue.prototype.$forceUpdate = function () {
-	    var vm = this;
-	    if (vm._watcher) {
-	      vm._watcher.update();
-	    }
-	  };
-
-	  Vue.prototype.$destroy = function () {
-	    var vm = this;
-	    if (vm._isBeingDestroyed) {
-	      return
-	    }
-	    callHook(vm, 'beforeDestroy');
-	    vm._isBeingDestroyed = true;
-	    // remove self from parent
-	    var parent = vm.$parent;
-	    if (parent && !parent._isBeingDestroyed && !vm.$options.abstract) {
-	      remove$1(parent.$children, vm);
-	    }
-	    // teardown watchers
-	    if (vm._watcher) {
-	      vm._watcher.teardown();
-	    }
-	    var i = vm._watchers.length;
-	    while (i--) {
-	      vm._watchers[i].teardown();
-	    }
-	    // remove reference from data ob
-	    // frozen object may not have observer.
-	    if (vm._data.__ob__) {
-	      vm._data.__ob__.vmCount--;
-	    }
-	    // call the last hook...
-	    vm._isDestroyed = true;
-	    callHook(vm, 'destroyed');
-	    // turn off all instance listeners.
-	    vm.$off();
-	    // remove __vue__ reference
-	    if (vm.$el) {
-	      vm.$el.__vue__ = null;
-	    }
-	    // invoke destroy hooks on current rendered tree
-	    vm.__patch__(vm._vnode, null);
-	  };
-	}
-
-	function callHook (vm, hook) {
-	  var handlers = vm.$options[hook];
-	  if (handlers) {
-	    for (var i = 0, j = handlers.length; i < j; i++) {
-	      handlers[i].call(vm);
-	    }
-	  }
-	  vm.$emit('hook:' + hook);
 	}
 
 	/*  */
@@ -2639,7 +1737,7 @@
 	  var name = Ctor.options.name || tag;
 	  var vnode = new VNode(
 	    ("vue-component-" + (Ctor.cid) + (name ? ("-" + name) : '')),
-	    data, undefined, undefined, undefined, undefined, context,
+	    data, undefined, undefined, undefined, context,
 	    { Ctor: Ctor, propsData: propsData, listeners: listeners, tag: tag, children: children }
 	  );
 	  return vnode
@@ -2659,19 +1757,17 @@
 	      props[key] = validateProp(key, propOptions, propsData);
 	    }
 	  }
-	  var vnode = Ctor.options.render.call(
-	    null,
-	    // ensure the createElement function in functional components
-	    // gets a unique context - this is necessary for correct named slot check
-	    bind$1(createElement, { _self: Object.create(context) }),
-	    {
-	      props: props,
-	      data: data,
-	      parent: context,
-	      children: normalizeChildren(children),
-	      slots: function () { return resolveSlots(children, context); }
-	    }
-	  );
+	  // ensure the createElement function in functional components
+	  // gets a unique context - this is necessary for correct named slot check
+	  var _context = Object.create(context);
+	  var h = function (a, b, c, d) { return createElement(_context, a, b, c, d, true); };
+	  var vnode = Ctor.options.render.call(null, h, {
+	    props: props,
+	    data: data,
+	    parent: context,
+	    children: children,
+	    slots: function () { return resolveSlots(children, context); }
+	  });
 	  if (vnode instanceof VNode) {
 	    vnode.functionalContext = context;
 	    if (data.slot) {
@@ -2714,8 +1810,8 @@
 	  parentElm,
 	  refElm
 	) {
-	  if (!vnode.child || vnode.child._isDestroyed) {
-	    var child = vnode.child = createComponentInstanceForVnode(
+	  if (!vnode.componentInstance || vnode.componentInstance._isDestroyed) {
+	    var child = vnode.componentInstance = createComponentInstanceForVnode(
 	      vnode,
 	      activeInstance,
 	      parentElm,
@@ -2734,7 +1830,7 @@
 	  vnode
 	) {
 	  var options = vnode.componentOptions;
-	  var child = vnode.child = oldVnode.child;
+	  var child = vnode.componentInstance = oldVnode.componentInstance;
 	  child._updateFromParent(
 	    options.propsData, // updated props
 	    options.listeners, // updated listeners
@@ -2744,23 +1840,23 @@
 	}
 
 	function insert (vnode) {
-	  if (!vnode.child._isMounted) {
-	    vnode.child._isMounted = true;
-	    callHook(vnode.child, 'mounted');
+	  if (!vnode.componentInstance._isMounted) {
+	    vnode.componentInstance._isMounted = true;
+	    callHook(vnode.componentInstance, 'mounted');
 	  }
 	  if (vnode.data.keepAlive) {
-	    vnode.child._inactive = false;
-	    callHook(vnode.child, 'activated');
+	    vnode.componentInstance._inactive = false;
+	    callHook(vnode.componentInstance, 'activated');
 	  }
 	}
 
 	function destroy$1 (vnode) {
-	  if (!vnode.child._isDestroyed) {
+	  if (!vnode.componentInstance._isDestroyed) {
 	    if (!vnode.data.keepAlive) {
-	      vnode.child.$destroy();
+	      vnode.componentInstance.$destroy();
 	    } else {
-	      vnode.child._inactive = true;
-	      callHook(vnode.child, 'deactivated');
+	      vnode.componentInstance._inactive = true;
+	      callHook(vnode.componentInstance, 'deactivated');
 	    }
 	  }
 	}
@@ -2882,26 +1978,194 @@
 
 	/*  */
 
+	function mergeVNodeHook (def, hookKey, hook, key) {
+	  key = key + hookKey;
+	  var injectedHash = def.__injected || (def.__injected = {});
+	  if (!injectedHash[key]) {
+	    injectedHash[key] = true;
+	    var oldHook = def[hookKey];
+	    if (oldHook) {
+	      def[hookKey] = function () {
+	        oldHook.apply(this, arguments);
+	        hook.apply(this, arguments);
+	      };
+	    } else {
+	      def[hookKey] = hook;
+	    }
+	  }
+	}
+
+	/*  */
+
+	var normalizeEvent = cached(function (name) {
+	  var once = name.charAt(0) === '~'; // Prefixed last, checked first
+	  name = once ? name.slice(1) : name;
+	  var capture = name.charAt(0) === '!';
+	  name = capture ? name.slice(1) : name;
+	  return {
+	    name: name,
+	    once: once,
+	    capture: capture
+	  }
+	});
+
+	function createEventHandle (fn) {
+	  var handle = {
+	    fn: fn,
+	    invoker: function () {
+	      var arguments$1 = arguments;
+
+	      var fn = handle.fn;
+	      if (Array.isArray(fn)) {
+	        for (var i = 0; i < fn.length; i++) {
+	          fn[i].apply(null, arguments$1);
+	        }
+	      } else {
+	        fn.apply(null, arguments);
+	      }
+	    }
+	  };
+	  return handle
+	}
+
+	function updateListeners (
+	  on,
+	  oldOn,
+	  add,
+	  remove$$1,
+	  vm
+	) {
+	  var name, cur, old, event;
+	  for (name in on) {
+	    cur = on[name];
+	    old = oldOn[name];
+	    event = normalizeEvent(name);
+	    if (!cur) {
+	      "development" !== 'production' && warn(
+	        "Invalid handler for event \"" + (event.name) + "\": got " + String(cur),
+	        vm
+	      );
+	    } else if (!old) {
+	      if (!cur.invoker) {
+	        cur = on[name] = createEventHandle(cur);
+	      }
+	      add(event.name, cur.invoker, event.once, event.capture);
+	    } else if (cur !== old) {
+	      old.fn = cur;
+	      on[name] = old;
+	    }
+	  }
+	  for (name in oldOn) {
+	    if (!on[name]) {
+	      event = normalizeEvent(name);
+	      remove$$1(event.name, oldOn[name].invoker, event.capture);
+	    }
+	  }
+	}
+
+	/*  */
+
+	// The template compiler attempts to minimize the need for normalization by
+	// statically analyzing the template at compile time.
+	//
+	// For plain HTML markup, normalization can be completely skipped because the
+	// generated render function is guaranteed to return Array<VNode>. There are
+	// two cases where extra normalization is needed:
+
+	// 1. When the children contains components - because a functional component
+	// may return an Array instead of a single root. In this case, just a simple
+	// nomralization is needed - if any child is an Array, we flatten the whole
+	// thing with Array.prototype.concat. It is guaranteed to be only 1-level deep
+	// because functional components already normalize their own children.
+	function simpleNormalizeChildren (children) {
+	  for (var i = 0; i < children.length; i++) {
+	    if (Array.isArray(children[i])) {
+	      return Array.prototype.concat.apply([], children)
+	    }
+	  }
+	  return children
+	}
+
+	// 2. When the children contains constrcuts that always generated nested Arrays,
+	// e.g. <template>, <slot>, v-for, or when the children is provided by user
+	// with hand-written render functions / JSX. In such cases a full normalization
+	// is needed to cater to all possible types of children values.
+	function normalizeChildren (children) {
+	  return isPrimitive(children)
+	    ? [createTextVNode(children)]
+	    : Array.isArray(children)
+	      ? normalizeArrayChildren(children)
+	      : undefined
+	}
+
+	function normalizeArrayChildren (children, nestedIndex) {
+	  var res = [];
+	  var i, c, last;
+	  for (i = 0; i < children.length; i++) {
+	    c = children[i];
+	    if (c == null || typeof c === 'boolean') { continue }
+	    last = res[res.length - 1];
+	    //  nested
+	    if (Array.isArray(c)) {
+	      res.push.apply(res, normalizeArrayChildren(c, ((nestedIndex || '') + "_" + i)));
+	    } else if (isPrimitive(c)) {
+	      if (last && last.text) {
+	        last.text += String(c);
+	      } else if (c !== '') {
+	        // convert primitive to vnode
+	        res.push(createTextVNode(c));
+	      }
+	    } else {
+	      if (c.text && last && last.text) {
+	        res[res.length - 1] = createTextVNode(last.text + c.text);
+	      } else {
+	        // default key for nested array children (likely generated by v-for)
+	        if (c.tag && c.key == null && nestedIndex != null) {
+	          c.key = "__vlist" + nestedIndex + "_" + i + "__";
+	        }
+	        res.push(c);
+	      }
+	    }
+	  }
+	  return res
+	}
+
+	/*  */
+
+	function getFirstComponentChild (children) {
+	  return children && children.filter(function (c) { return c && c.componentOptions; })[0]
+	}
+
+	/*  */
+
+	var SIMPLE_NORMALIZE = 1;
+	var ALWAYS_NORMALIZE = 2;
+
 	// wrapper function for providing a more flexible interface
 	// without getting yelled at by flow
 	function createElement (
+	  context,
 	  tag,
 	  data,
-	  children
+	  children,
+	  normalizationType,
+	  alwaysNormalize
 	) {
-	  if (data && (Array.isArray(data) || typeof data !== 'object')) {
+	  if (Array.isArray(data) || isPrimitive(data)) {
+	    normalizationType = children;
 	    children = data;
 	    data = undefined;
 	  }
-	  // make sure to use real instance instead of proxy as context
-	  return _createElement(this._self, tag, data, children)
+	  if (alwaysNormalize) { normalizationType = ALWAYS_NORMALIZE; }
+	  return _createElement(context, tag, data, children, normalizationType)
 	}
 
 	function _createElement (
 	  context,
 	  tag,
 	  data,
-	  children
+	  children,
+	  normalizationType
 	) {
 	  if (data && data.__ob__) {
 	    "development" !== 'production' && warn(
@@ -2909,11 +2173,11 @@
 	      'Always create fresh vnode data objects in each render!',
 	      context
 	    );
-	    return
+	    return createEmptyVNode()
 	  }
 	  if (!tag) {
 	    // in case of component :is set to falsy value
-	    return emptyVNode()
+	    return createEmptyVNode()
 	  }
 	  // support single function children as default scoped slot
 	  if (Array.isArray(children) &&
@@ -2922,31 +2186,58 @@
 	    data.scopedSlots = { default: children[0] };
 	    children.length = 0;
 	  }
+	  if (normalizationType === ALWAYS_NORMALIZE) {
+	    children = normalizeChildren(children);
+	  } else if (normalizationType === SIMPLE_NORMALIZE) {
+	    children = simpleNormalizeChildren(children);
+	  }
+	  var vnode, ns;
 	  if (typeof tag === 'string') {
 	    var Ctor;
-	    var ns = config.getTagNamespace(tag);
+	    ns = config.getTagNamespace(tag);
 	    if (config.isReservedTag(tag)) {
 	      // platform built-in elements
-	      return new VNode(
-	        tag, data, normalizeChildren(children, ns),
-	        undefined, undefined, ns, context
-	      )
+	      vnode = new VNode(
+	        config.parsePlatformTagName(tag), data, children,
+	        undefined, undefined, context
+	      );
 	    } else if ((Ctor = resolveAsset(context.$options, 'components', tag))) {
 	      // component
-	      return createComponent(Ctor, data, context, children, tag)
+	      vnode = createComponent(Ctor, data, context, children, tag);
 	    } else {
 	      // unknown or unlisted namespaced elements
 	      // check at runtime because it may get assigned a namespace when its
 	      // parent normalizes children
-	      var childNs = tag === 'foreignObject' ? 'xhtml' : ns;
-	      return new VNode(
-	        tag, data, normalizeChildren(children, childNs),
-	        undefined, undefined, ns, context
-	      )
+	      vnode = new VNode(
+	        tag, data, children,
+	        undefined, undefined, context
+	      );
 	    }
 	  } else {
 	    // direct component options / constructor
-	    return createComponent(tag, data, context, children)
+	    vnode = createComponent(tag, data, context, children);
+	  }
+	  if (vnode) {
+	    if (ns) { applyNS(vnode, ns); }
+	    return vnode
+	  } else {
+	    return createEmptyVNode()
+	  }
+	}
+
+	function applyNS (vnode, ns) {
+	  vnode.ns = ns;
+	  if (vnode.tag === 'foreignObject') {
+	    // use default namespace inside foreignObject
+	    return
+	  }
+	  if (vnode.children) {
+	    for (var i = 0, l = vnode.children.length; i < l; i++) {
+	      var child = vnode.children[i];
+	      if (child.tag && !child.ns) {
+	        applyNS(child, ns);
+	      }
+	    }
 	  }
 	}
 
@@ -2960,12 +2251,14 @@
 	  var renderContext = parentVnode && parentVnode.context;
 	  vm.$slots = resolveSlots(vm.$options._renderChildren, renderContext);
 	  vm.$scopedSlots = {};
-	  // bind the public createElement fn to this instance
+	  // bind the createElement fn to this instance
 	  // so that we get proper render context inside it.
-	  vm.$createElement = bind$1(createElement, vm);
-	  if (vm.$options.el) {
-	    vm.$mount(vm.$options.el);
-	  }
+	  // args order: tag, data, children, normalizationType, alwaysNormalize
+	  // internal version is used by render functions compiled from templates
+	  vm._c = function (a, b, c, d) { return createElement(vm, a, b, c, d, false); };
+	  // normalization is always applied for the public version, used in
+	  // user-written render functions.
+	  vm.$createElement = function (a, b, c, d) { return createElement(vm, a, b, c, d, true); };
 	}
 
 	function renderMixin (Vue) {
@@ -3023,21 +2316,21 @@
 	          vm
 	        );
 	      }
-	      vnode = emptyVNode();
+	      vnode = createEmptyVNode();
 	    }
 	    // set parent
 	    vnode.parent = _parentVnode;
 	    return vnode
 	  };
 
-	  // shorthands used in render functions
-	  Vue.prototype._h = createElement;
 	  // toString for mustaches
 	  Vue.prototype._s = _toString;
+	  // convert text to vnode
+	  Vue.prototype._v = createTextVNode;
 	  // number conversion
 	  Vue.prototype._n = toNumber;
 	  // empty vnode
-	  Vue.prototype._e = emptyVNode;
+	  Vue.prototype._e = createEmptyVNode;
 	  // loose equal
 	  Vue.prototype._q = looseEqual;
 	  // loose indexOf
@@ -3091,7 +2384,6 @@
 	  }
 
 	  // filter resolution helper
-	  var identity = function (_) { return _; };
 	  Vue.prototype._f = function resolveFilter (id) {
 	    return resolveAsset(this.$options, 'filters', id, true) || identity
 	  };
@@ -3102,7 +2394,7 @@
 	    render
 	  ) {
 	    var ret, i, l, keys, key;
-	    if (Array.isArray(val)) {
+	    if (Array.isArray(val) || typeof val === 'string') {
 	      ret = new Array(val.length);
 	      for (i = 0, l = val.length; i < l; i++) {
 	        ret[i] = render(val[i], i);
@@ -3127,11 +2419,16 @@
 	  Vue.prototype._t = function (
 	    name,
 	    fallback,
-	    props
+	    props,
+	    bindObject
 	  ) {
 	    var scopedSlotFn = this.$scopedSlots[name];
 	    if (scopedSlotFn) { // scoped slot
-	      return scopedSlotFn(props || {}) || fallback
+	      props = props || {};
+	      if (bindObject) {
+	        extend(props, bindObject);
+	      }
+	      return scopedSlotFn(props) || fallback
 	    } else {
 	      var slotNodes = this.$slots[name];
 	      // warn duplicate slot usage
@@ -3168,7 +2465,8 @@
 	          if (key === 'class' || key === 'style') {
 	            data[key] = value[key];
 	          } else {
-	            var hash = asProp || config.mustUseProp(tag, key)
+	            var type = data.attrs && data.attrs.type;
+	            var hash = asProp || config.mustUseProp(tag, type, key)
 	              ? data.domProps || (data.domProps = {})
 	              : data.attrs || (data.attrs = {});
 	            hash[key] = value[key];
@@ -3195,14 +2493,13 @@
 	}
 
 	function resolveSlots (
-	  renderChildren,
+	  children,
 	  context
 	) {
 	  var slots = {};
-	  if (!renderChildren) {
+	  if (!children) {
 	    return slots
 	  }
-	  var children = normalizeChildren(renderChildren) || [];
 	  var defaultSlot = [];
 	  var name, child;
 	  for (var i = 0, l = children.length; i < l; i++) {
@@ -3235,23 +2532,46 @@
 
 	function initEvents (vm) {
 	  vm._events = Object.create(null);
+	  vm._hasHookEvent = false;
 	  // init parent attached events
 	  var listeners = vm.$options._parentListeners;
-	  var add = function (event, fn, once) {
-	    once ? vm.$once(event, fn) : vm.$on(event, fn);
-	  };
-	  var remove$$1 = bind$1(vm.$off, vm);
-	  vm._updateListeners = function (listeners, oldListeners) {
-	    updateListeners(listeners, oldListeners || {}, add, remove$$1, vm);
-	  };
 	  if (listeners) {
-	    vm._updateListeners(listeners);
+	    updateComponentListeners(vm, listeners);
 	  }
 	}
 
+	var target;
+
+	function add$1 (event, fn, once) {
+	  if (once) {
+	    target.$once(event, fn);
+	  } else {
+	    target.$on(event, fn);
+	  }
+	}
+
+	function remove$2 (event, fn) {
+	  target.$off(event, fn);
+	}
+
+	function updateComponentListeners (
+	  vm,
+	  listeners,
+	  oldListeners
+	) {
+	  target = vm;
+	  updateListeners(listeners, oldListeners || {}, add$1, remove$2, vm);
+	}
+
 	function eventsMixin (Vue) {
+	  var hookRE = /^hook:/;
 	  Vue.prototype.$on = function (event, fn) {
 	    var vm = this;(vm._events[event] || (vm._events[event] = [])).push(fn);
+	    // optimize hook:event cost by using a boolean flag marked at registration
+	    // instead of a hash lookup
+	    if (hookRE.test(event)) {
+	      vm._hasHookEvent = true;
+	    }
 	    return vm
 	  };
 
@@ -3311,6 +2631,792 @@
 
 	/*  */
 
+	var activeInstance = null;
+
+	function initLifecycle (vm) {
+	  var options = vm.$options;
+
+	  // locate first non-abstract parent
+	  var parent = options.parent;
+	  if (parent && !options.abstract) {
+	    while (parent.$options.abstract && parent.$parent) {
+	      parent = parent.$parent;
+	    }
+	    parent.$children.push(vm);
+	  }
+
+	  vm.$parent = parent;
+	  vm.$root = parent ? parent.$root : vm;
+
+	  vm.$children = [];
+	  vm.$refs = {};
+
+	  vm._watcher = null;
+	  vm._inactive = false;
+	  vm._isMounted = false;
+	  vm._isDestroyed = false;
+	  vm._isBeingDestroyed = false;
+	}
+
+	function lifecycleMixin (Vue) {
+	  Vue.prototype._mount = function (
+	    el,
+	    hydrating
+	  ) {
+	    var vm = this;
+	    vm.$el = el;
+	    if (!vm.$options.render) {
+	      vm.$options.render = createEmptyVNode;
+	      {
+	        /* istanbul ignore if */
+	        if (vm.$options.template && vm.$options.template.charAt(0) !== '#') {
+	          warn(
+	            'You are using the runtime-only build of Vue where the template ' +
+	            'option is not available. Either pre-compile the templates into ' +
+	            'render functions, or use the compiler-included build.',
+	            vm
+	          );
+	        } else {
+	          warn(
+	            'Failed to mount component: template or render function not defined.',
+	            vm
+	          );
+	        }
+	      }
+	    }
+	    callHook(vm, 'beforeMount');
+	    vm._watcher = new Watcher(vm, function updateComponent () {
+	      vm._update(vm._render(), hydrating);
+	    }, noop);
+	    hydrating = false;
+	    // manually mounted instance, call mounted on self
+	    // mounted is called for render-created child components in its inserted hook
+	    if (vm.$vnode == null) {
+	      vm._isMounted = true;
+	      callHook(vm, 'mounted');
+	    }
+	    return vm
+	  };
+
+	  Vue.prototype._update = function (vnode, hydrating) {
+	    var vm = this;
+	    if (vm._isMounted) {
+	      callHook(vm, 'beforeUpdate');
+	    }
+	    var prevEl = vm.$el;
+	    var prevVnode = vm._vnode;
+	    var prevActiveInstance = activeInstance;
+	    activeInstance = vm;
+	    vm._vnode = vnode;
+	    // Vue.prototype.__patch__ is injected in entry points
+	    // based on the rendering backend used.
+	    if (!prevVnode) {
+	      // initial render
+	      vm.$el = vm.__patch__(
+	        vm.$el, vnode, hydrating, false /* removeOnly */,
+	        vm.$options._parentElm,
+	        vm.$options._refElm
+	      );
+	    } else {
+	      // updates
+	      vm.$el = vm.__patch__(prevVnode, vnode);
+	    }
+	    activeInstance = prevActiveInstance;
+	    // update __vue__ reference
+	    if (prevEl) {
+	      prevEl.__vue__ = null;
+	    }
+	    if (vm.$el) {
+	      vm.$el.__vue__ = vm;
+	    }
+	    // if parent is an HOC, update its $el as well
+	    if (vm.$vnode && vm.$parent && vm.$vnode === vm.$parent._vnode) {
+	      vm.$parent.$el = vm.$el;
+	    }
+	    // updated hook is called by the scheduler to ensure that children are
+	    // updated in a parent's updated hook.
+	  };
+
+	  Vue.prototype._updateFromParent = function (
+	    propsData,
+	    listeners,
+	    parentVnode,
+	    renderChildren
+	  ) {
+	    var vm = this;
+	    var hasChildren = !!(vm.$options._renderChildren || renderChildren);
+	    vm.$options._parentVnode = parentVnode;
+	    vm.$vnode = parentVnode; // update vm's placeholder node without re-render
+	    if (vm._vnode) { // update child tree's parent
+	      vm._vnode.parent = parentVnode;
+	    }
+	    vm.$options._renderChildren = renderChildren;
+	    // update props
+	    if (propsData && vm.$options.props) {
+	      observerState.shouldConvert = false;
+	      {
+	        observerState.isSettingProps = true;
+	      }
+	      var propKeys = vm.$options._propKeys || [];
+	      for (var i = 0; i < propKeys.length; i++) {
+	        var key = propKeys[i];
+	        vm[key] = validateProp(key, vm.$options.props, propsData, vm);
+	      }
+	      observerState.shouldConvert = true;
+	      {
+	        observerState.isSettingProps = false;
+	      }
+	      vm.$options.propsData = propsData;
+	    }
+	    // update listeners
+	    if (listeners) {
+	      var oldListeners = vm.$options._parentListeners;
+	      vm.$options._parentListeners = listeners;
+	      updateComponentListeners(vm, listeners, oldListeners);
+	    }
+	    // resolve slots + force update if has children
+	    if (hasChildren) {
+	      vm.$slots = resolveSlots(renderChildren, parentVnode.context);
+	      vm.$forceUpdate();
+	    }
+	  };
+
+	  Vue.prototype.$forceUpdate = function () {
+	    var vm = this;
+	    if (vm._watcher) {
+	      vm._watcher.update();
+	    }
+	  };
+
+	  Vue.prototype.$destroy = function () {
+	    var vm = this;
+	    if (vm._isBeingDestroyed) {
+	      return
+	    }
+	    callHook(vm, 'beforeDestroy');
+	    vm._isBeingDestroyed = true;
+	    // remove self from parent
+	    var parent = vm.$parent;
+	    if (parent && !parent._isBeingDestroyed && !vm.$options.abstract) {
+	      remove$1(parent.$children, vm);
+	    }
+	    // teardown watchers
+	    if (vm._watcher) {
+	      vm._watcher.teardown();
+	    }
+	    var i = vm._watchers.length;
+	    while (i--) {
+	      vm._watchers[i].teardown();
+	    }
+	    // remove reference from data ob
+	    // frozen object may not have observer.
+	    if (vm._data.__ob__) {
+	      vm._data.__ob__.vmCount--;
+	    }
+	    // call the last hook...
+	    vm._isDestroyed = true;
+	    callHook(vm, 'destroyed');
+	    // turn off all instance listeners.
+	    vm.$off();
+	    // remove __vue__ reference
+	    if (vm.$el) {
+	      vm.$el.__vue__ = null;
+	    }
+	    // invoke destroy hooks on current rendered tree
+	    vm.__patch__(vm._vnode, null);
+	  };
+	}
+
+	function callHook (vm, hook) {
+	  var handlers = vm.$options[hook];
+	  if (handlers) {
+	    for (var i = 0, j = handlers.length; i < j; i++) {
+	      handlers[i].call(vm);
+	    }
+	  }
+	  if (vm._hasHookEvent) {
+	    vm.$emit('hook:' + hook);
+	  }
+	}
+
+	/*  */
+
+
+	var queue = [];
+	var has$1 = {};
+	var circular = {};
+	var waiting = false;
+	var flushing = false;
+	var index = 0;
+
+	/**
+	 * Reset the scheduler's state.
+	 */
+	function resetSchedulerState () {
+	  queue.length = 0;
+	  has$1 = {};
+	  {
+	    circular = {};
+	  }
+	  waiting = flushing = false;
+	}
+
+	/**
+	 * Flush both queues and run the watchers.
+	 */
+	function flushSchedulerQueue () {
+	  flushing = true;
+	  var watcher, id, vm;
+
+	  // Sort queue before flush.
+	  // This ensures that:
+	  // 1. Components are updated from parent to child. (because parent is always
+	  //    created before the child)
+	  // 2. A component's user watchers are run before its render watcher (because
+	  //    user watchers are created before the render watcher)
+	  // 3. If a component is destroyed during a parent component's watcher run,
+	  //    its watchers can be skipped.
+	  queue.sort(function (a, b) { return a.id - b.id; });
+
+	  // do not cache length because more watchers might be pushed
+	  // as we run existing watchers
+	  for (index = 0; index < queue.length; index++) {
+	    watcher = queue[index];
+	    id = watcher.id;
+	    has$1[id] = null;
+	    watcher.run();
+	    // in dev build, check and stop circular updates.
+	    if ("development" !== 'production' && has$1[id] != null) {
+	      circular[id] = (circular[id] || 0) + 1;
+	      if (circular[id] > config._maxUpdateCount) {
+	        warn(
+	          'You may have an infinite update loop ' + (
+	            watcher.user
+	              ? ("in watcher with expression \"" + (watcher.expression) + "\"")
+	              : "in a component render function."
+	          ),
+	          watcher.vm
+	        );
+	        break
+	      }
+	    }
+	  }
+
+	  // call updated hooks
+	  index = queue.length;
+	  while (index--) {
+	    watcher = queue[index];
+	    vm = watcher.vm;
+	    if (vm._watcher === watcher && vm._isMounted) {
+	      callHook(vm, 'updated');
+	    }
+	  }
+
+	  // devtool hook
+	  /* istanbul ignore if */
+	  if (devtools && config.devtools) {
+	    devtools.emit('flush');
+	  }
+
+	  resetSchedulerState();
+	}
+
+	/**
+	 * Push a watcher into the watcher queue.
+	 * Jobs with duplicate IDs will be skipped unless it's
+	 * pushed when the queue is being flushed.
+	 */
+	function queueWatcher (watcher) {
+	  var id = watcher.id;
+	  if (has$1[id] == null) {
+	    has$1[id] = true;
+	    if (!flushing) {
+	      queue.push(watcher);
+	    } else {
+	      // if already flushing, splice the watcher based on its id
+	      // if already past its id, it will be run next immediately.
+	      var i = queue.length - 1;
+	      while (i >= 0 && queue[i].id > watcher.id) {
+	        i--;
+	      }
+	      queue.splice(Math.max(i, index) + 1, 0, watcher);
+	    }
+	    // queue the flush
+	    if (!waiting) {
+	      waiting = true;
+	      nextTick(flushSchedulerQueue);
+	    }
+	  }
+	}
+
+	/*  */
+
+	var uid$2 = 0;
+
+	/**
+	 * A watcher parses an expression, collects dependencies,
+	 * and fires callback when the expression value changes.
+	 * This is used for both the $watch() api and directives.
+	 */
+	var Watcher = function Watcher (
+	  vm,
+	  expOrFn,
+	  cb,
+	  options
+	) {
+	  this.vm = vm;
+	  vm._watchers.push(this);
+	  // options
+	  if (options) {
+	    this.deep = !!options.deep;
+	    this.user = !!options.user;
+	    this.lazy = !!options.lazy;
+	    this.sync = !!options.sync;
+	  } else {
+	    this.deep = this.user = this.lazy = this.sync = false;
+	  }
+	  this.cb = cb;
+	  this.id = ++uid$2; // uid for batching
+	  this.active = true;
+	  this.dirty = this.lazy; // for lazy watchers
+	  this.deps = [];
+	  this.newDeps = [];
+	  this.depIds = new _Set();
+	  this.newDepIds = new _Set();
+	  this.expression = expOrFn.toString();
+	  // parse expression for getter
+	  if (typeof expOrFn === 'function') {
+	    this.getter = expOrFn;
+	  } else {
+	    this.getter = parsePath(expOrFn);
+	    if (!this.getter) {
+	      this.getter = function () {};
+	      "development" !== 'production' && warn(
+	        "Failed watching path: \"" + expOrFn + "\" " +
+	        'Watcher only accepts simple dot-delimited paths. ' +
+	        'For full control, use a function instead.',
+	        vm
+	      );
+	    }
+	  }
+	  this.value = this.lazy
+	    ? undefined
+	    : this.get();
+	};
+
+	/**
+	 * Evaluate the getter, and re-collect dependencies.
+	 */
+	Watcher.prototype.get = function get () {
+	  pushTarget(this);
+	  var value = this.getter.call(this.vm, this.vm);
+	  // "touch" every property so they are all tracked as
+	  // dependencies for deep watching
+	  if (this.deep) {
+	    traverse(value);
+	  }
+	  popTarget();
+	  this.cleanupDeps();
+	  return value
+	};
+
+	/**
+	 * Add a dependency to this directive.
+	 */
+	Watcher.prototype.addDep = function addDep (dep) {
+	  var id = dep.id;
+	  if (!this.newDepIds.has(id)) {
+	    this.newDepIds.add(id);
+	    this.newDeps.push(dep);
+	    if (!this.depIds.has(id)) {
+	      dep.addSub(this);
+	    }
+	  }
+	};
+
+	/**
+	 * Clean up for dependency collection.
+	 */
+	Watcher.prototype.cleanupDeps = function cleanupDeps () {
+	    var this$1 = this;
+
+	  var i = this.deps.length;
+	  while (i--) {
+	    var dep = this$1.deps[i];
+	    if (!this$1.newDepIds.has(dep.id)) {
+	      dep.removeSub(this$1);
+	    }
+	  }
+	  var tmp = this.depIds;
+	  this.depIds = this.newDepIds;
+	  this.newDepIds = tmp;
+	  this.newDepIds.clear();
+	  tmp = this.deps;
+	  this.deps = this.newDeps;
+	  this.newDeps = tmp;
+	  this.newDeps.length = 0;
+	};
+
+	/**
+	 * Subscriber interface.
+	 * Will be called when a dependency changes.
+	 */
+	Watcher.prototype.update = function update () {
+	  /* istanbul ignore else */
+	  if (this.lazy) {
+	    this.dirty = true;
+	  } else if (this.sync) {
+	    this.run();
+	  } else {
+	    queueWatcher(this);
+	  }
+	};
+
+	/**
+	 * Scheduler job interface.
+	 * Will be called by the scheduler.
+	 */
+	Watcher.prototype.run = function run () {
+	  if (this.active) {
+	    var value = this.get();
+	    if (
+	      value !== this.value ||
+	      // Deep watchers and watchers on Object/Arrays should fire even
+	      // when the value is the same, because the value may
+	      // have mutated.
+	      isObject(value) ||
+	      this.deep
+	    ) {
+	      // set new value
+	      var oldValue = this.value;
+	      this.value = value;
+	      if (this.user) {
+	        try {
+	          this.cb.call(this.vm, value, oldValue);
+	        } catch (e) {
+	          /* istanbul ignore else */
+	          if (config.errorHandler) {
+	            config.errorHandler.call(null, e, this.vm);
+	          } else {
+	            "development" !== 'production' && warn(
+	              ("Error in watcher \"" + (this.expression) + "\""),
+	              this.vm
+	            );
+	            throw e
+	          }
+	        }
+	      } else {
+	        this.cb.call(this.vm, value, oldValue);
+	      }
+	    }
+	  }
+	};
+
+	/**
+	 * Evaluate the value of the watcher.
+	 * This only gets called for lazy watchers.
+	 */
+	Watcher.prototype.evaluate = function evaluate () {
+	  this.value = this.get();
+	  this.dirty = false;
+	};
+
+	/**
+	 * Depend on all deps collected by this watcher.
+	 */
+	Watcher.prototype.depend = function depend () {
+	    var this$1 = this;
+
+	  var i = this.deps.length;
+	  while (i--) {
+	    this$1.deps[i].depend();
+	  }
+	};
+
+	/**
+	 * Remove self from all dependencies' subscriber list.
+	 */
+	Watcher.prototype.teardown = function teardown () {
+	    var this$1 = this;
+
+	  if (this.active) {
+	    // remove self from vm's watcher list
+	    // this is a somewhat expensive operation so we skip it
+	    // if the vm is being destroyed.
+	    if (!this.vm._isBeingDestroyed) {
+	      remove$1(this.vm._watchers, this);
+	    }
+	    var i = this.deps.length;
+	    while (i--) {
+	      this$1.deps[i].removeSub(this$1);
+	    }
+	    this.active = false;
+	  }
+	};
+
+	/**
+	 * Recursively traverse an object to evoke all converted
+	 * getters, so that every nested property inside the object
+	 * is collected as a "deep" dependency.
+	 */
+	var seenObjects = new _Set();
+	function traverse (val) {
+	  seenObjects.clear();
+	  _traverse(val, seenObjects);
+	}
+
+	function _traverse (val, seen) {
+	  var i, keys;
+	  var isA = Array.isArray(val);
+	  if ((!isA && !isObject(val)) || !Object.isExtensible(val)) {
+	    return
+	  }
+	  if (val.__ob__) {
+	    var depId = val.__ob__.dep.id;
+	    if (seen.has(depId)) {
+	      return
+	    }
+	    seen.add(depId);
+	  }
+	  if (isA) {
+	    i = val.length;
+	    while (i--) { _traverse(val[i], seen); }
+	  } else {
+	    keys = Object.keys(val);
+	    i = keys.length;
+	    while (i--) { _traverse(val[keys[i]], seen); }
+	  }
+	}
+
+	/*  */
+
+	function initState (vm) {
+	  vm._watchers = [];
+	  var opts = vm.$options;
+	  if (opts.props) { initProps(vm, opts.props); }
+	  if (opts.methods) { initMethods(vm, opts.methods); }
+	  if (opts.data) {
+	    initData(vm);
+	  } else {
+	    observe(vm._data = {}, true /* asRootData */);
+	  }
+	  if (opts.computed) { initComputed(vm, opts.computed); }
+	  if (opts.watch) { initWatch(vm, opts.watch); }
+	}
+
+	var isReservedProp = { key: 1, ref: 1, slot: 1 };
+
+	function initProps (vm, props) {
+	  var propsData = vm.$options.propsData || {};
+	  var keys = vm.$options._propKeys = Object.keys(props);
+	  var isRoot = !vm.$parent;
+	  // root instance props should be converted
+	  observerState.shouldConvert = isRoot;
+	  var loop = function ( i ) {
+	    var key = keys[i];
+	    /* istanbul ignore else */
+	    {
+	      if (isReservedProp[key]) {
+	        warn(
+	          ("\"" + key + "\" is a reserved attribute and cannot be used as component prop."),
+	          vm
+	        );
+	      }
+	      defineReactive$$1(vm, key, validateProp(key, props, propsData, vm), function () {
+	        if (vm.$parent && !observerState.isSettingProps) {
+	          warn(
+	            "Avoid mutating a prop directly since the value will be " +
+	            "overwritten whenever the parent component re-renders. " +
+	            "Instead, use a data or computed property based on the prop's " +
+	            "value. Prop being mutated: \"" + key + "\"",
+	            vm
+	          );
+	        }
+	      });
+	    }
+	  };
+
+	  for (var i = 0; i < keys.length; i++) loop( i );
+	  observerState.shouldConvert = true;
+	}
+
+	function initData (vm) {
+	  var data = vm.$options.data;
+	  data = vm._data = typeof data === 'function'
+	    ? data.call(vm)
+	    : data || {};
+	  if (!isPlainObject(data)) {
+	    data = {};
+	    "development" !== 'production' && warn(
+	      'data functions should return an object:\n' +
+	      'https://vuejs.org/v2/guide/components.html#data-Must-Be-a-Function',
+	      vm
+	    );
+	  }
+	  // proxy data on instance
+	  var keys = Object.keys(data);
+	  var props = vm.$options.props;
+	  var i = keys.length;
+	  while (i--) {
+	    if (props && hasOwn(props, keys[i])) {
+	      "development" !== 'production' && warn(
+	        "The data property \"" + (keys[i]) + "\" is already declared as a prop. " +
+	        "Use prop default value instead.",
+	        vm
+	      );
+	    } else {
+	      proxy(vm, keys[i]);
+	    }
+	  }
+	  // observe data
+	  observe(data, true /* asRootData */);
+	}
+
+	var computedSharedDefinition = {
+	  enumerable: true,
+	  configurable: true,
+	  get: noop,
+	  set: noop
+	};
+
+	function initComputed (vm, computed) {
+	  for (var key in computed) {
+	    /* istanbul ignore if */
+	    if ("development" !== 'production' && key in vm) {
+	      warn(
+	        "existing instance property \"" + key + "\" will be " +
+	        "overwritten by a computed property with the same name.",
+	        vm
+	      );
+	    }
+	    var userDef = computed[key];
+	    if (typeof userDef === 'function') {
+	      computedSharedDefinition.get = makeComputedGetter(userDef, vm);
+	      computedSharedDefinition.set = noop;
+	    } else {
+	      computedSharedDefinition.get = userDef.get
+	        ? userDef.cache !== false
+	          ? makeComputedGetter(userDef.get, vm)
+	          : bind$1(userDef.get, vm)
+	        : noop;
+	      computedSharedDefinition.set = userDef.set
+	        ? bind$1(userDef.set, vm)
+	        : noop;
+	    }
+	    Object.defineProperty(vm, key, computedSharedDefinition);
+	  }
+	}
+
+	function makeComputedGetter (getter, owner) {
+	  var watcher = new Watcher(owner, getter, noop, {
+	    lazy: true
+	  });
+	  return function computedGetter () {
+	    if (watcher.dirty) {
+	      watcher.evaluate();
+	    }
+	    if (Dep.target) {
+	      watcher.depend();
+	    }
+	    return watcher.value
+	  }
+	}
+
+	function initMethods (vm, methods) {
+	  for (var key in methods) {
+	    vm[key] = methods[key] == null ? noop : bind$1(methods[key], vm);
+	    if ("development" !== 'production' && methods[key] == null) {
+	      warn(
+	        "method \"" + key + "\" has an undefined value in the component definition. " +
+	        "Did you reference the function correctly?",
+	        vm
+	      );
+	    }
+	  }
+	}
+
+	function initWatch (vm, watch) {
+	  for (var key in watch) {
+	    var handler = watch[key];
+	    if (Array.isArray(handler)) {
+	      for (var i = 0; i < handler.length; i++) {
+	        createWatcher(vm, key, handler[i]);
+	      }
+	    } else {
+	      createWatcher(vm, key, handler);
+	    }
+	  }
+	}
+
+	function createWatcher (vm, key, handler) {
+	  var options;
+	  if (isPlainObject(handler)) {
+	    options = handler;
+	    handler = handler.handler;
+	  }
+	  if (typeof handler === 'string') {
+	    handler = vm[handler];
+	  }
+	  vm.$watch(key, handler, options);
+	}
+
+	function stateMixin (Vue) {
+	  // flow somehow has problems with directly declared definition object
+	  // when using Object.defineProperty, so we have to procedurally build up
+	  // the object here.
+	  var dataDef = {};
+	  dataDef.get = function () {
+	    return this._data
+	  };
+	  {
+	    dataDef.set = function (newData) {
+	      warn(
+	        'Avoid replacing instance root $data. ' +
+	        'Use nested data properties instead.',
+	        this
+	      );
+	    };
+	  }
+	  Object.defineProperty(Vue.prototype, '$data', dataDef);
+
+	  Vue.prototype.$set = set$1;
+	  Vue.prototype.$delete = del;
+
+	  Vue.prototype.$watch = function (
+	    expOrFn,
+	    cb,
+	    options
+	  ) {
+	    var vm = this;
+	    options = options || {};
+	    options.user = true;
+	    var watcher = new Watcher(vm, expOrFn, cb, options);
+	    if (options.immediate) {
+	      cb.call(vm, watcher.value);
+	    }
+	    return function unwatchFn () {
+	      watcher.teardown();
+	    }
+	  };
+	}
+
+	function proxy (vm, key) {
+	  if (!isReserved(key)) {
+	    Object.defineProperty(vm, key, {
+	      configurable: true,
+	      enumerable: true,
+	      get: function proxyGetter () {
+	        return vm._data[key]
+	      },
+	      set: function proxySetter (val) {
+	        vm._data[key] = val;
+	      }
+	    });
+	  }
+	}
+
+	/*  */
+
 	var uid = 0;
 
 	function initMixin (Vue) {
@@ -3341,10 +3447,13 @@
 	    vm._self = vm;
 	    initLifecycle(vm);
 	    initEvents(vm);
+	    initRender(vm);
 	    callHook(vm, 'beforeCreate');
 	    initState(vm);
 	    callHook(vm, 'created');
-	    initRender(vm);
+	    if (vm.$options.el) {
+	      vm.$mount(vm.$options.el);
+	    }
 	  };
 	}
 
@@ -3456,7 +3565,8 @@
 	      if (!/^[a-zA-Z][\w-]*$/.test(name)) {
 	        warn(
 	          'Invalid component name: "' + name + '". Component names ' +
-	          'can only contain alphanumeric characaters and the hyphen.'
+	          'can only contain alphanumeric characters and the hyphen, ' +
+	          'and must start with a letter.'
 	        );
 	      }
 	    }
@@ -3536,6 +3646,10 @@
 
 	var patternTypes = [String, RegExp];
 
+	function getComponentName (opts) {
+	  return opts && (opts.Ctor.options.name || opts.tag)
+	}
+
 	function matches (pattern, name) {
 	  if (typeof pattern === 'string') {
 	    return pattern.split(',').indexOf(name) > -1
@@ -3544,22 +3658,64 @@
 	  }
 	}
 
+	function pruneCache (cache, filter) {
+	  for (var key in cache) {
+	    var cachedNode = cache[key];
+	    if (cachedNode) {
+	      var name = getComponentName(cachedNode.componentOptions);
+	      if (name && !filter(name)) {
+	        pruneCacheEntry(cachedNode);
+	        cache[key] = null;
+	      }
+	    }
+	  }
+	}
+
+	function pruneCacheEntry (vnode) {
+	  if (vnode) {
+	    if (!vnode.componentInstance._inactive) {
+	      callHook(vnode.componentInstance, 'deactivated');
+	    }
+	    vnode.componentInstance.$destroy();
+	  }
+	}
+
 	var KeepAlive = {
 	  name: 'keep-alive',
 	  abstract: true,
+
 	  props: {
 	    include: patternTypes,
 	    exclude: patternTypes
 	  },
+
 	  created: function created () {
 	    this.cache = Object.create(null);
 	  },
+
+	  destroyed: function destroyed () {
+	    var this$1 = this;
+
+	    for (var key in this.cache) {
+	      pruneCacheEntry(this$1.cache[key]);
+	    }
+	  },
+
+	  watch: {
+	    include: function include (val) {
+	      pruneCache(this.cache, function (name) { return matches(val, name); });
+	    },
+	    exclude: function exclude (val) {
+	      pruneCache(this.cache, function (name) { return !matches(val, name); });
+	    }
+	  },
+
 	  render: function render () {
 	    var vnode = getFirstComponentChild(this.$slots.default);
-	    if (vnode && vnode.componentOptions) {
-	      var opts = vnode.componentOptions;
+	    var componentOptions = vnode && vnode.componentOptions;
+	    if (componentOptions) {
 	      // check pattern
-	      var name = opts.Ctor.options.name || opts.tag;
+	      var name = getComponentName(componentOptions);
 	      if (name && (
 	        (this.include && !matches(this.include, name)) ||
 	        (this.exclude && matches(this.exclude, name))
@@ -3569,25 +3725,16 @@
 	      var key = vnode.key == null
 	        // same constructor may get registered as different local components
 	        // so cid alone is not enough (#3269)
-	        ? opts.Ctor.cid + (opts.tag ? ("::" + (opts.tag)) : '')
+	        ? componentOptions.Ctor.cid + (componentOptions.tag ? ("::" + (componentOptions.tag)) : '')
 	        : vnode.key;
 	      if (this.cache[key]) {
-	        vnode.child = this.cache[key].child;
+	        vnode.componentInstance = this.cache[key].componentInstance;
 	      } else {
 	        this.cache[key] = vnode;
 	      }
 	      vnode.data.keepAlive = true;
 	    }
 	    return vnode
-	  },
-	  destroyed: function destroyed () {
-	    var this$1 = this;
-
-	    for (var key in this.cache) {
-	      var vnode = this$1.cache[key];
-	      callHook(vnode.child, 'deactivated');
-	      vnode.child.$destroy();
-	    }
 	  }
 	};
 
@@ -3637,14 +3784,15 @@
 	  get: isServerRendering
 	});
 
-	Vue$3.version = '2.1.4';
+	Vue$3.version = '2.1.10';
 
 	/*  */
 
 	// attributes that should be using props for binding
-	var mustUseProp = function (tag, attr) {
+	var acceptValue = makeMap('input,textarea,option,select');
+	var mustUseProp = function (tag, type, attr) {
 	  return (
-	    (attr === 'value' && (tag === 'input' || tag === 'textarea' || tag === 'option')) ||
+	    (attr === 'value' && acceptValue(tag)) && type !== 'button' ||
 	    (attr === 'selected' && tag === 'option') ||
 	    (attr === 'checked' && tag === 'input') ||
 	    (attr === 'muted' && tag === 'video')
@@ -3682,8 +3830,8 @@
 	  var data = vnode.data;
 	  var parentNode = vnode;
 	  var childNode = vnode;
-	  while (childNode.child) {
-	    childNode = childNode.child._vnode;
+	  while (childNode.componentInstance) {
+	    childNode = childNode.componentInstance._vnode;
 	    if (childNode.data) {
 	      data = mergeClassData(childNode.data, data);
 	    }
@@ -3752,8 +3900,7 @@
 
 	var namespaceMap = {
 	  svg: 'http://www.w3.org/2000/svg',
-	  math: 'http://www.w3.org/1998/Math/MathML',
-	  xhtml: 'http://www.w3.org/1999/xhtml'
+	  math: 'http://www.w3.org/1998/Math/MathML'
 	};
 
 	var isHTMLTag = makeMap(
@@ -3773,7 +3920,7 @@
 	// this map is intentionally selective, only covering SVG elements that may
 	// contain child elements.
 	var isSVG = makeMap(
-	  'svg,animate,circle,clippath,cursor,defs,desc,ellipse,filter,font,' +
+	  'svg,animate,circle,clippath,cursor,defs,desc,ellipse,filter,' +
 	  'font-face,g,glyph,image,line,marker,mask,missing-glyph,path,pattern,' +
 	  'polygon,polyline,rect,switch,symbol,text,textpath,tspan,use,view',
 	  true
@@ -3894,10 +4041,6 @@
 	  node.textContent = text;
 	}
 
-	function childNodes (node) {
-	  return node.childNodes
-	}
-
 	function setAttribute (node, key, val) {
 	  node.setAttribute(key, val);
 	}
@@ -3915,7 +4058,6 @@
 		nextSibling: nextSibling,
 		tagName: tagName,
 		setTextContent: setTextContent,
-		childNodes: childNodes,
 		setAttribute: setAttribute
 	});
 
@@ -3941,7 +4083,7 @@
 	  if (!key) { return }
 
 	  var vm = vnode.context;
-	  var ref = vnode.child || vnode.elm;
+	  var ref = vnode.componentInstance || vnode.elm;
 	  var refs = vm.$refs;
 	  if (isRemoval) {
 	    if (Array.isArray(refs[key])) {
@@ -4028,16 +4170,16 @@
 	  function createRmCb (childElm, listeners) {
 	    function remove$$1 () {
 	      if (--remove$$1.listeners === 0) {
-	        removeElement(childElm);
+	        removeNode(childElm);
 	      }
 	    }
 	    remove$$1.listeners = listeners;
 	    return remove$$1
 	  }
 
-	  function removeElement (el) {
+	  function removeNode (el) {
 	    var parent = nodeOps.parentNode(el);
-	    // element may have already been removed due to v-html
+	    // element may have already been removed due to v-html / v-text
 	    if (parent) {
 	      nodeOps.removeChild(parent, el);
 	    }
@@ -4061,7 +4203,7 @@
 	        if (
 	          !inPre &&
 	          !vnode.ns &&
-	          !(config.ignoredElements && config.ignoredElements.indexOf(tag) > -1) &&
+	          !(config.ignoredElements.length && config.ignoredElements.indexOf(tag) > -1) &&
 	          config.isUnknownElement(tag)
 	        ) {
 	          warn(
@@ -4101,7 +4243,7 @@
 	  function createComponent (vnode, insertedVnodeQueue, parentElm, refElm) {
 	    var i = vnode.data;
 	    if (isDef(i)) {
-	      var isReactivated = isDef(vnode.child) && i.keepAlive;
+	      var isReactivated = isDef(vnode.componentInstance) && i.keepAlive;
 	      if (isDef(i = i.hook) && isDef(i = i.init)) {
 	        i(vnode, false /* hydrating */, parentElm, refElm);
 	      }
@@ -4109,13 +4251,30 @@
 	      // it should've created a child instance and mounted it. the child
 	      // component also has set the placeholder vnode's elm.
 	      // in that case we can just return the element and be done.
-	      if (isDef(vnode.child)) {
+	      if (isDef(vnode.componentInstance)) {
 	        initComponent(vnode, insertedVnodeQueue);
 	        if (isReactivated) {
 	          reactivateComponent(vnode, insertedVnodeQueue, parentElm, refElm);
 	        }
 	        return true
 	      }
+	    }
+	  }
+
+	  function initComponent (vnode, insertedVnodeQueue) {
+	    if (vnode.data.pendingInsert) {
+	      insertedVnodeQueue.push.apply(insertedVnodeQueue, vnode.data.pendingInsert);
+	    }
+	    vnode.elm = vnode.componentInstance.$el;
+	    if (isPatchable(vnode)) {
+	      invokeCreateHooks(vnode, insertedVnodeQueue);
+	      setScope(vnode);
+	    } else {
+	      // empty component root.
+	      // skip all element-related modules except for ref (#3455)
+	      registerRef(vnode);
+	      // make sure to invoke the insert hook
+	      insertedVnodeQueue.push(vnode);
 	    }
 	  }
 
@@ -4126,8 +4285,8 @@
 	    // again. It's not ideal to involve module-specific logic in here but
 	    // there doesn't seem to be a better way to do it.
 	    var innerNode = vnode;
-	    while (innerNode.child) {
-	      innerNode = innerNode.child._vnode;
+	    while (innerNode.componentInstance) {
+	      innerNode = innerNode.componentInstance._vnode;
 	      if (isDef(i = innerNode.data) && isDef(i = i.transition)) {
 	        for (i = 0; i < cbs.activate.length; ++i) {
 	          cbs.activate[i](emptyNode, innerNode);
@@ -4143,7 +4302,11 @@
 
 	  function insert (parent, elm, ref) {
 	    if (parent) {
-	      nodeOps.insertBefore(parent, elm, ref);
+	      if (ref) {
+	        nodeOps.insertBefore(parent, elm, ref);
+	      } else {
+	        nodeOps.appendChild(parent, elm);
+	      }
 	    }
 	  }
 
@@ -4158,8 +4321,8 @@
 	  }
 
 	  function isPatchable (vnode) {
-	    while (vnode.child) {
-	      vnode = vnode.child._vnode;
+	    while (vnode.componentInstance) {
+	      vnode = vnode.componentInstance._vnode;
 	    }
 	    return isDef(vnode.tag)
 	  }
@@ -4172,23 +4335,6 @@
 	    if (isDef(i)) {
 	      if (i.create) { i.create(emptyNode, vnode); }
 	      if (i.insert) { insertedVnodeQueue.push(vnode); }
-	    }
-	  }
-
-	  function initComponent (vnode, insertedVnodeQueue) {
-	    if (vnode.data.pendingInsert) {
-	      insertedVnodeQueue.push.apply(insertedVnodeQueue, vnode.data.pendingInsert);
-	    }
-	    vnode.elm = vnode.child.$el;
-	    if (isPatchable(vnode)) {
-	      invokeCreateHooks(vnode, insertedVnodeQueue);
-	      setScope(vnode);
-	    } else {
-	      // empty component root.
-	      // skip all element-related modules except for ref (#3455)
-	      registerRef(vnode);
-	      // make sure to invoke the insert hook
-	      insertedVnodeQueue.push(vnode);
 	    }
 	  }
 
@@ -4235,7 +4381,7 @@
 	          removeAndInvokeRemoveHook(ch);
 	          invokeDestroyHook(ch);
 	        } else { // Text node
-	          nodeOps.removeChild(parentElm, ch.elm);
+	          removeNode(ch.elm);
 	        }
 	      }
 	    }
@@ -4253,7 +4399,7 @@
 	        rm.listeners += listeners;
 	      }
 	      // recursively invoke hooks on child component root node
-	      if (isDef(i = vnode.child) && isDef(i = i._vnode) && isDef(i.data)) {
+	      if (isDef(i = vnode.componentInstance) && isDef(i = i._vnode) && isDef(i.data)) {
 	        removeAndInvokeRemoveHook(i, rm);
 	      }
 	      for (i = 0; i < cbs.remove.length; ++i) {
@@ -4265,7 +4411,7 @@
 	        rm();
 	      }
 	    } else {
-	      removeElement(vnode.elm);
+	      removeNode(vnode.elm);
 	    }
 	  }
 
@@ -4323,14 +4469,14 @@
 	              'Make sure each v-for item has a unique key.'
 	            );
 	          }
-	          if (elmToMove.tag !== newStartVnode.tag) {
-	            // same key but different element. treat as new element
-	            createElm(newStartVnode, insertedVnodeQueue, parentElm, oldStartVnode.elm);
-	            newStartVnode = newCh[++newStartIdx];
-	          } else {
+	          if (sameVnode(elmToMove, newStartVnode)) {
 	            patchVnode(elmToMove, newStartVnode, insertedVnodeQueue);
 	            oldCh[idxInOld] = undefined;
 	            canMove && nodeOps.insertBefore(parentElm, newStartVnode.elm, oldStartVnode.elm);
+	            newStartVnode = newCh[++newStartIdx];
+	          } else {
+	            // same key but different element. treat as new element
+	            createElm(newStartVnode, insertedVnodeQueue, parentElm, oldStartVnode.elm);
 	            newStartVnode = newCh[++newStartIdx];
 	          }
 	        }
@@ -4357,7 +4503,7 @@
 	        vnode.key === oldVnode.key &&
 	        (vnode.isCloned || vnode.isOnce)) {
 	      vnode.elm = oldVnode.elm;
-	      vnode.child = oldVnode.child;
+	      vnode.componentInstance = oldVnode.componentInstance;
 	      return
 	    }
 	    var i;
@@ -4405,6 +4551,11 @@
 	  }
 
 	  var bailed = false;
+	  // list of modules that can skip create hook during hydration because they
+	  // are already rendered on the client or has no need for initialization
+	  var isRenderedModule = makeMap('attrs,style,class,staticClass,staticStyle,key');
+
+	  // Note: this is a browser-only function so we can assume elms are DOM nodes.
 	  function hydrate (elm, vnode, insertedVnodeQueue) {
 	    {
 	      if (!assertNodeMatch(elm, vnode)) {
@@ -4417,7 +4568,7 @@
 	    var children = vnode.children;
 	    if (isDef(data)) {
 	      if (isDef(i = data.hook) && isDef(i = i.init)) { i(vnode, true /* hydrating */); }
-	      if (isDef(i = vnode.child)) {
+	      if (isDef(i = vnode.componentInstance)) {
 	        // child component. it should have hydrated its own tree.
 	        initComponent(vnode, insertedVnodeQueue);
 	        return true
@@ -4425,37 +4576,43 @@
 	    }
 	    if (isDef(tag)) {
 	      if (isDef(children)) {
-	        var childNodes = nodeOps.childNodes(elm);
 	        // empty element, allow client to pick up and populate children
-	        if (!childNodes.length) {
+	        if (!elm.hasChildNodes()) {
 	          createChildren(vnode, children, insertedVnodeQueue);
 	        } else {
 	          var childrenMatch = true;
-	          if (childNodes.length !== children.length) {
-	            childrenMatch = false;
-	          } else {
-	            for (var i$1 = 0; i$1 < children.length; i$1++) {
-	              if (!hydrate(childNodes[i$1], children[i$1], insertedVnodeQueue)) {
-	                childrenMatch = false;
-	                break
-	              }
+	          var childNode = elm.firstChild;
+	          for (var i$1 = 0; i$1 < children.length; i$1++) {
+	            if (!childNode || !hydrate(childNode, children[i$1], insertedVnodeQueue)) {
+	              childrenMatch = false;
+	              break
 	            }
+	            childNode = childNode.nextSibling;
 	          }
-	          if (!childrenMatch) {
+	          // if childNode is not null, it means the actual childNodes list is
+	          // longer than the virtual children list.
+	          if (!childrenMatch || childNode) {
 	            if ("development" !== 'production' &&
 	                typeof console !== 'undefined' &&
 	                !bailed) {
 	              bailed = true;
 	              console.warn('Parent: ', elm);
-	              console.warn('Mismatching childNodes vs. VNodes: ', childNodes, children);
+	              console.warn('Mismatching childNodes vs. VNodes: ', elm.childNodes, children);
 	            }
 	            return false
 	          }
 	        }
 	      }
 	      if (isDef(data)) {
-	        invokeCreateHooks(vnode, insertedVnodeQueue);
+	        for (var key in data) {
+	          if (!isRenderedModule(key)) {
+	            invokeCreateHooks(vnode, insertedVnodeQueue);
+	            break
+	          }
+	        }
 	      }
+	    } else if (elm.data !== vnode.text) {
+	      elm.data = vnode.text;
 	    }
 	    return true
 	  }
@@ -4464,10 +4621,10 @@
 	    if (vnode.tag) {
 	      return (
 	        vnode.tag.indexOf('vue-component') === 0 ||
-	        vnode.tag.toLowerCase() === nodeOps.tagName(node).toLowerCase()
+	        vnode.tag.toLowerCase() === (node.tagName && node.tagName.toLowerCase())
 	      )
 	    } else {
-	      return _toString(vnode.text) === node.data
+	      return node.nodeType === (vnode.isComment ? 8 : 3)
 	    }
 	  }
 
@@ -4477,7 +4634,6 @@
 	      return
 	    }
 
-	    var elm, parent;
 	    var isInitialPatch = false;
 	    var insertedVnodeQueue = [];
 
@@ -4517,11 +4673,18 @@
 	          // create an empty node and replace it
 	          oldVnode = emptyNodeAt(oldVnode);
 	        }
-
 	        // replacing existing element
-	        elm = oldVnode.elm;
-	        parent = nodeOps.parentNode(elm);
-	        createElm(vnode, insertedVnodeQueue, parent, nodeOps.nextSibling(elm));
+	        var oldElm = oldVnode.elm;
+	        var parentElm$1 = nodeOps.parentNode(oldElm);
+	        createElm(
+	          vnode,
+	          insertedVnodeQueue,
+	          // extremely rare edge case: do not insert if old element is in a
+	          // leaving transition. Only happens when combining transition +
+	          // keep-alive + HOCs. (#4590)
+	          oldElm._leaveCb ? null : parentElm$1,
+	          nodeOps.nextSibling(oldElm)
+	        );
 
 	        if (vnode.parent) {
 	          // component root element replaced.
@@ -4538,8 +4701,8 @@
 	          }
 	        }
 
-	        if (parent !== null) {
-	          removeVnodes(parent, [oldVnode], 0, 0);
+	        if (parentElm$1 !== null) {
+	          removeVnodes(parentElm$1, [oldVnode], 0, 0);
 	        } else if (isDef(oldVnode.tag)) {
 	          invokeDestroyHook(oldVnode);
 	        }
@@ -4561,14 +4724,15 @@
 	  }
 	};
 
-	function updateDirectives (
-	  oldVnode,
-	  vnode
-	) {
-	  if (!oldVnode.data.directives && !vnode.data.directives) {
-	    return
+	function updateDirectives (oldVnode, vnode) {
+	  if (oldVnode.data.directives || vnode.data.directives) {
+	    _update(oldVnode, vnode);
 	  }
+	}
+
+	function _update (oldVnode, vnode) {
 	  var isCreate = oldVnode === emptyNode;
+	  var isDestroy = vnode === emptyNode;
 	  var oldDirs = normalizeDirectives$1(oldVnode.data.directives, oldVnode.context);
 	  var newDirs = normalizeDirectives$1(vnode.data.directives, vnode.context);
 
@@ -4597,9 +4761,9 @@
 
 	  if (dirsWithInsert.length) {
 	    var callInsert = function () {
-	      dirsWithInsert.forEach(function (dir) {
-	        callHook$1(dir, 'inserted', vnode, oldVnode);
-	      });
+	      for (var i = 0; i < dirsWithInsert.length; i++) {
+	        callHook$1(dirsWithInsert[i], 'inserted', vnode, oldVnode);
+	      }
 	    };
 	    if (isCreate) {
 	      mergeVNodeHook(vnode.data.hook || (vnode.data.hook = {}), 'insert', callInsert, 'dir-insert');
@@ -4610,9 +4774,9 @@
 
 	  if (dirsWithPostpatch.length) {
 	    mergeVNodeHook(vnode.data.hook || (vnode.data.hook = {}), 'postpatch', function () {
-	      dirsWithPostpatch.forEach(function (dir) {
-	        callHook$1(dir, 'componentUpdated', vnode, oldVnode);
-	      });
+	      for (var i = 0; i < dirsWithPostpatch.length; i++) {
+	        callHook$1(dirsWithPostpatch[i], 'componentUpdated', vnode, oldVnode);
+	      }
 	    }, 'dir-postpatch');
 	  }
 
@@ -4620,7 +4784,7 @@
 	    for (key in oldDirs) {
 	      if (!newDirs[key]) {
 	        // no longer present, unbind
-	        callHook$1(oldDirs[key], 'unbind', oldVnode);
+	        callHook$1(oldDirs[key], 'unbind', oldVnode, oldVnode, isDestroy);
 	      }
 	    }
 	  }
@@ -4652,10 +4816,10 @@
 	  return dir.rawName || ((dir.name) + "." + (Object.keys(dir.modifiers || {}).join('.')))
 	}
 
-	function callHook$1 (dir, hook, vnode, oldVnode) {
+	function callHook$1 (dir, hook, vnode, oldVnode, isDestroy) {
 	  var fn = dir.def && dir.def[hook];
 	  if (fn) {
-	    fn(vnode.elm, dir, vnode, oldVnode);
+	    fn(vnode.elm, dir, vnode, oldVnode, isDestroy);
 	  }
 	}
 
@@ -4685,6 +4849,11 @@
 	    if (old !== cur) {
 	      setAttr(elm, key, cur);
 	    }
+	  }
+	  // #4391: in IE9, setting type can reset value for input[type=radio]
+	  /* istanbul ignore if */
+	  if (isIE9 && attrs.value !== oldAttrs.value) {
+	    setAttr(elm, 'value', attrs.value);
 	  }
 	  for (key in oldAttrs) {
 	    if (attrs[key] == null) {
@@ -4759,8 +4928,37 @@
 	  update: updateClass
 	};
 
-	// skip type checking this file because we need to attach private properties
-	// to elements
+	/*  */
+
+	var target$1;
+
+	function add$2 (
+	  event,
+	  handler,
+	  once,
+	  capture
+	) {
+	  if (once) {
+	    var oldHandler = handler;
+	    var _target = target$1; // save current target element in closure
+	    handler = function (ev) {
+	      remove$3(event, handler, capture, _target);
+	      arguments.length === 1
+	        ? oldHandler(ev)
+	        : oldHandler.apply(null, arguments);
+	    };
+	  }
+	  target$1.addEventListener(event, handler, capture);
+	}
+
+	function remove$3 (
+	  event,
+	  handler,
+	  capture,
+	  _target
+	) {
+	  (_target || target$1).removeEventListener(event, handler, capture);
+	}
 
 	function updateDOMListeners (oldVnode, vnode) {
 	  if (!oldVnode.data.on && !vnode.data.on) {
@@ -4768,26 +4966,8 @@
 	  }
 	  var on = vnode.data.on || {};
 	  var oldOn = oldVnode.data.on || {};
-	  var add = vnode.elm._v_add || (
-	    vnode.elm._v_add = function (event, handler, once, capture) {
-	      if (once) {
-	        var oldHandler = handler;
-	        handler = function (ev) {
-	          remove(event, handler, capture);
-	          arguments.length === 1
-	            ? oldHandler(ev)
-	            : oldHandler.apply(null, arguments);
-	        };
-	      }
-	      vnode.elm.addEventListener(event, handler, capture);
-	    }
-	  );
-	  var remove = vnode.elm._v_remove || (
-	    vnode.elm._v_remove = function (event, handler, capture) {
-	      vnode.elm.removeEventListener(event, handler, capture);
-	    }
-	  );
-	  updateListeners(on, oldOn, add, remove, vnode.context);
+	  target$1 = vnode.elm;
+	  updateListeners(on, oldOn, add$2, remove$3, vnode.context);
 	}
 
 	var events = {
@@ -4824,19 +5004,52 @@
 	      if (vnode.children) { vnode.children.length = 0; }
 	      if (cur === oldProps[key]) { continue }
 	    }
+
 	    if (key === 'value') {
 	      // store value as _value as well since
 	      // non-string values will be stringified
 	      elm._value = cur;
 	      // avoid resetting cursor position when value is the same
 	      var strCur = cur == null ? '' : String(cur);
-	      if (elm.value !== strCur && !elm.composing) {
+	      if (shouldUpdateValue(elm, vnode, strCur)) {
 	        elm.value = strCur;
 	      }
 	    } else {
 	      elm[key] = cur;
 	    }
 	  }
+	}
+
+	// check platforms/web/util/attrs.js acceptValue
+
+
+	function shouldUpdateValue (
+	  elm,
+	  vnode,
+	  checkVal
+	) {
+	  return (!elm.composing && (
+	    vnode.tag === 'option' ||
+	    isDirty(elm, checkVal) ||
+	    isInputChanged(vnode, checkVal)
+	  ))
+	}
+
+	function isDirty (elm, checkVal) {
+	  // return true when textbox (.number and .trim) loses focus and its value is not equal to the updated value
+	  return document.activeElement !== elm && elm.value !== checkVal
+	}
+
+	function isInputChanged (vnode, newVal) {
+	  var value = vnode.elm.value;
+	  var modifiers = vnode.elm._vModifiers; // injected by v-model runtime
+	  if ((modifiers && modifiers.number) || vnode.elm.type === 'number') {
+	    return toNumber(value) !== toNumber(newVal)
+	  }
+	  if (modifiers && modifiers.trim) {
+	    return value.trim() !== newVal.trim()
+	  }
+	  return value !== newVal
 	}
 
 	var domProps = {
@@ -4890,8 +5103,8 @@
 
 	  if (checkChild) {
 	    var childNode = vnode;
-	    while (childNode.child) {
-	      childNode = childNode.child._vnode;
+	    while (childNode.componentInstance) {
+	      childNode = childNode.componentInstance._vnode;
 	      if (childNode.data && (styleData = normalizeStyleData(childNode.data))) {
 	        extend(res, styleData);
 	      }
@@ -5065,7 +5278,11 @@
 	  }
 	}
 
-	var raf = (inBrowser && window.requestAnimationFrame) || setTimeout;
+	// binding to window is necessary to make hot reload work in IE in strict mode
+	var raf = inBrowser && window.requestAnimationFrame
+	  ? window.requestAnimationFrame.bind(window)
+	  : setTimeout;
+
 	function nextFrame (fn) {
 	  raf(function () {
 	    raf(fn);
@@ -5183,7 +5400,7 @@
 
 	/*  */
 
-	function enter (vnode) {
+	function enter (vnode, toggleDisplay) {
 	  var el = vnode.elm;
 
 	  // call leave callback now
@@ -5205,8 +5422,10 @@
 	  var css = data.css;
 	  var type = data.type;
 	  var enterClass = data.enterClass;
+	  var enterToClass = data.enterToClass;
 	  var enterActiveClass = data.enterActiveClass;
 	  var appearClass = data.appearClass;
+	  var appearToClass = data.appearToClass;
 	  var appearActiveClass = data.appearActiveClass;
 	  var beforeEnter = data.beforeEnter;
 	  var enter = data.enter;
@@ -5236,6 +5455,7 @@
 
 	  var startClass = isAppear ? appearClass : enterClass;
 	  var activeClass = isAppear ? appearActiveClass : enterActiveClass;
+	  var toClass = isAppear ? appearToClass : enterToClass;
 	  var beforeEnterHook = isAppear ? (beforeAppear || beforeEnter) : beforeEnter;
 	  var enterHook = isAppear ? (typeof appear === 'function' ? appear : enter) : enter;
 	  var afterEnterHook = isAppear ? (afterAppear || afterEnter) : afterEnter;
@@ -5250,6 +5470,7 @@
 
 	  var cb = el._enterCb = once(function () {
 	    if (expectsCSS) {
+	      removeTransitionClass(el, toClass);
 	      removeTransitionClass(el, activeClass);
 	    }
 	    if (cb.cancelled) {
@@ -5269,7 +5490,6 @@
 	      var parent = el.parentNode;
 	      var pendingNode = parent && parent._pending && parent._pending[vnode.key];
 	      if (pendingNode &&
-	          pendingNode.context === vnode.context &&
 	          pendingNode.tag === vnode.tag &&
 	          pendingNode.elm._leaveCb) {
 	        pendingNode.elm._leaveCb();
@@ -5284,6 +5504,7 @@
 	    addTransitionClass(el, startClass);
 	    addTransitionClass(el, activeClass);
 	    nextFrame(function () {
+	      addTransitionClass(el, toClass);
 	      removeTransitionClass(el, startClass);
 	      if (!cb.cancelled && !userWantsControl) {
 	        whenTransitionEnds(el, type, cb);
@@ -5292,6 +5513,7 @@
 	  }
 
 	  if (vnode.data.show) {
+	    toggleDisplay && toggleDisplay();
 	    enterHook && enterHook(el, cb);
 	  }
 
@@ -5322,6 +5544,7 @@
 	  var css = data.css;
 	  var type = data.type;
 	  var leaveClass = data.leaveClass;
+	  var leaveToClass = data.leaveToClass;
 	  var leaveActiveClass = data.leaveActiveClass;
 	  var beforeLeave = data.beforeLeave;
 	  var leave = data.leave;
@@ -5341,6 +5564,7 @@
 	      el.parentNode._pending[vnode.key] = null;
 	    }
 	    if (expectsCSS) {
+	      removeTransitionClass(el, leaveToClass);
 	      removeTransitionClass(el, leaveActiveClass);
 	    }
 	    if (cb.cancelled) {
@@ -5375,6 +5599,7 @@
 	      addTransitionClass(el, leaveClass);
 	      addTransitionClass(el, leaveActiveClass);
 	      nextFrame(function () {
+	        addTransitionClass(el, leaveToClass);
 	        removeTransitionClass(el, leaveClass);
 	        if (!cb.cancelled && !userWantsControl) {
 	          whenTransitionEnds(el, type, cb);
@@ -5410,6 +5635,9 @@
 	    enterClass: (name + "-enter"),
 	    leaveClass: (name + "-leave"),
 	    appearClass: (name + "-enter"),
+	    enterToClass: (name + "-enter-to"),
+	    leaveToClass: (name + "-leave-to"),
+	    appearToClass: (name + "-enter-to"),
 	    enterActiveClass: (name + "-enter-active"),
 	    leaveActiveClass: (name + "-leave-active"),
 	    appearActiveClass: (name + "-enter-active")
@@ -5501,17 +5729,17 @@
 	      if (isIE || isEdge) {
 	        setTimeout(cb, 0);
 	      }
-	    } else if (
-	      (vnode.tag === 'textarea' || el.type === 'text') &&
-	      !binding.modifiers.lazy
-	    ) {
-	      if (!isAndroid) {
-	        el.addEventListener('compositionstart', onCompositionStart);
-	        el.addEventListener('compositionend', onCompositionEnd);
-	      }
-	      /* istanbul ignore if */
-	      if (isIE9) {
-	        el.vmodel = true;
+	    } else if (vnode.tag === 'textarea' || el.type === 'text') {
+	      el._vModifiers = binding.modifiers;
+	      if (!binding.modifiers.lazy) {
+	        if (!isAndroid) {
+	          el.addEventListener('compositionstart', onCompositionStart);
+	          el.addEventListener('compositionend', onCompositionEnd);
+	        }
+	        /* istanbul ignore if */
+	        if (isIE9) {
+	          el.vmodel = true;
+	        }
 	      }
 	    }
 	  },
@@ -5599,8 +5827,8 @@
 
 	// recursively search for possible transition defined inside the component root
 	function locateNode (vnode) {
-	  return vnode.child && (!vnode.data || !vnode.data.transition)
-	    ? locateNode(vnode.child._vnode)
+	  return vnode.componentInstance && (!vnode.data || !vnode.data.transition)
+	    ? locateNode(vnode.componentInstance._vnode)
 	    : vnode
 	}
 
@@ -5610,13 +5838,18 @@
 
 	    vnode = locateNode(vnode);
 	    var transition = vnode.data && vnode.data.transition;
+	    var originalDisplay = el.__vOriginalDisplay =
+	      el.style.display === 'none' ? '' : el.style.display;
 	    if (value && transition && !isIE9) {
-	      enter(vnode);
+	      vnode.data.show = true;
+	      enter(vnode, function () {
+	        el.style.display = originalDisplay;
+	      });
+	    } else {
+	      el.style.display = value ? originalDisplay : 'none';
 	    }
-	    var originalDisplay = el.style.display === 'none' ? '' : el.style.display;
-	    el.style.display = value ? originalDisplay : 'none';
-	    el.__vOriginalDisplay = originalDisplay;
 	  },
+
 	  update: function update (el, ref, vnode) {
 	    var value = ref.value;
 	    var oldValue = ref.oldValue;
@@ -5626,9 +5859,11 @@
 	    vnode = locateNode(vnode);
 	    var transition = vnode.data && vnode.data.transition;
 	    if (transition && !isIE9) {
+	      vnode.data.show = true;
 	      if (value) {
-	        enter(vnode);
-	        el.style.display = el.__vOriginalDisplay;
+	        enter(vnode, function () {
+	          el.style.display = el.__vOriginalDisplay;
+	        });
 	      } else {
 	        leave(vnode, function () {
 	          el.style.display = 'none';
@@ -5636,6 +5871,18 @@
 	      }
 	    } else {
 	      el.style.display = value ? el.__vOriginalDisplay : 'none';
+	    }
+	  },
+
+	  unbind: function unbind (
+	    el,
+	    binding,
+	    vnode,
+	    oldVnode,
+	    isDestroy
+	  ) {
+	    if (!isDestroy) {
+	      el.style.display = el.__vOriginalDisplay;
 	    }
 	  }
 	};
@@ -5658,10 +5905,13 @@
 	  type: String,
 	  enterClass: String,
 	  leaveClass: String,
+	  enterToClass: String,
+	  leaveToClass: String,
 	  enterActiveClass: String,
 	  leaveActiveClass: String,
 	  appearClass: String,
-	  appearActiveClass: String
+	  appearActiveClass: String,
+	  appearToClass: String
 	};
 
 	// in case the child is also an abstract component, e.g. <keep-alive>
@@ -5705,10 +5955,15 @@
 	  }
 	}
 
+	function isSameChild (child, oldChild) {
+	  return oldChild.key === child.key && oldChild.tag === child.tag
+	}
+
 	var Transition = {
 	  name: 'transition',
 	  props: transitionProps,
 	  abstract: true,
+
 	  render: function render (h) {
 	    var this$1 = this;
 
@@ -5764,9 +6019,15 @@
 	      return placeholder(h, rawChild)
 	    }
 
-	    var key = child.key = child.key == null || child.isStatic
-	      ? ("__v" + (child.tag + this._uid) + "__")
-	      : child.key;
+	    // ensure a key that is unique to the vnode type and to this transition
+	    // component instance. This key will be used to remove pending leaving nodes
+	    // during entering.
+	    var id = "__transition-" + (this._uid) + "-";
+	    var key = child.key = child.key == null
+	      ? id + child.tag
+	      : isPrimitive(child.key)
+	        ? (String(child.key).indexOf(id) === 0 ? child.key : id + child.key)
+	        : child.key;
 	    var data = (child.data || (child.data = {})).transition = extractTransitionData(this);
 	    var oldRawChild = this._vnode;
 	    var oldChild = getRealChild(oldRawChild);
@@ -5777,11 +6038,10 @@
 	      child.data.show = true;
 	    }
 
-	    if (oldChild && oldChild.data && oldChild.key !== key) {
+	    if (oldChild && oldChild.data && !isSameChild(child, oldChild)) {
 	      // replace old child transition data with fresh one
 	      // important for dynamic transitions!
-	      var oldData = oldChild.data.transition = extend({}, data);
-
+	      var oldData = oldChild && (oldChild.data.transition = extend({}, data));
 	      // handle transition mode
 	      if (mode === 'out-in') {
 	        // return placeholder node and queue update when leave finishes
@@ -5992,6 +6252,15 @@
 	  return this._mount(el, hydrating)
 	};
 
+	if ("development" !== 'production' &&
+	    inBrowser && typeof console !== 'undefined') {
+	  console[console.info ? 'info' : 'log'](
+	    "You are running Vue in development mode.\n" +
+	    "Make sure to turn on production mode when deploying for production.\n" +
+	    "See more tips at https://vuejs.org/guide/deployment.html"
+	  );
+	}
+
 	// devtools global hook
 	/* istanbul ignore next */
 	setTimeout(function () {
@@ -6000,10 +6269,10 @@
 	      devtools.emit('init', Vue$3);
 	    } else if (
 	      "development" !== 'production' &&
-	      inBrowser && /Chrome\/\d+/.test(window.navigator.userAgent)
+	      inBrowser && !isEdge && /Chrome\/\d+/.test(window.navigator.userAgent)
 	    ) {
-	      console.log(
-	        'Download the Vue Devtools for a better development experience:\n' +
+	      console[console.info ? 'info' : 'log'](
+	        'Download the Vue Devtools extension for a better development experience:\n' +
 	        'https://github.com/vuejs/vue-devtools'
 	      );
 	    }
@@ -6105,22 +6374,6 @@
 
 	// Special Elements (can contain anything)
 	var isScriptOrStyle = makeMap('script,style', true);
-	var hasLang = function (attr) { return attr.name === 'lang' && attr.value !== 'html'; };
-	var isSpecialTag = function (tag, isSFC, stack) {
-	  if (isScriptOrStyle(tag)) {
-	    return true
-	  }
-	  if (isSFC && stack.length === 1) {
-	    // top-level template that has no pre-processor
-	    if (tag === 'template' && !stack[0].attrs.some(hasLang)) {
-	      return false
-	    } else {
-	      return true
-	    }
-	  }
-	  return false
-	};
-
 	var reCache = {};
 
 	var ltRE = /&lt;/g;
@@ -6149,7 +6402,7 @@
 	  while (html) {
 	    last = html;
 	    // Make sure we're not in a script or style element
-	    if (!lastTag || !isSpecialTag(lastTag, options.sfc, stack)) {
+	    if (!lastTag || !isScriptOrStyle(lastTag)) {
 	      var textEnd = html.indexOf('<');
 	      if (textEnd === 0) {
 	        // Comment:
@@ -6184,7 +6437,7 @@
 	        if (endTagMatch) {
 	          var curIndex = index;
 	          advance(endTagMatch[0].length);
-	          parseEndTag(endTagMatch[0], endTagMatch[1], curIndex, index);
+	          parseEndTag(endTagMatch[1], curIndex, index);
 	          continue
 	        }
 
@@ -6241,7 +6494,7 @@
 	      });
 	      index += html.length - rest.length;
 	      html = rest;
-	      parseEndTag('</' + stackedTag + '>', stackedTag, index - endTagLength, index);
+	      parseEndTag(stackedTag, index - endTagLength, index);
 	    }
 
 	    if (html === last && options.chars) {
@@ -6287,10 +6540,10 @@
 
 	    if (expectHTML) {
 	      if (lastTag === 'p' && isNonPhrasingTag(tagName)) {
-	        parseEndTag('', lastTag);
+	        parseEndTag(lastTag);
 	      }
 	      if (canBeLeftOpenTag(tagName) && lastTag === tagName) {
-	        parseEndTag('', tagName);
+	        parseEndTag(tagName);
 	      }
 	    }
 
@@ -6317,7 +6570,7 @@
 	    }
 
 	    if (!unary) {
-	      stack.push({ tag: tagName, attrs: attrs });
+	      stack.push({ tag: tagName, lowerCasedTag: tagName.toLowerCase(), attrs: attrs });
 	      lastTag = tagName;
 	      unarySlash = '';
 	    }
@@ -6327,16 +6580,19 @@
 	    }
 	  }
 
-	  function parseEndTag (tag, tagName, start, end) {
-	    var pos;
+	  function parseEndTag (tagName, start, end) {
+	    var pos, lowerCasedTagName;
 	    if (start == null) { start = index; }
 	    if (end == null) { end = index; }
 
+	    if (tagName) {
+	      lowerCasedTagName = tagName.toLowerCase();
+	    }
+
 	    // Find the closest opened tag of the same type
 	    if (tagName) {
-	      var needle = tagName.toLowerCase();
 	      for (pos = stack.length - 1; pos >= 0; pos--) {
-	        if (stack[pos].tag.toLowerCase() === needle) {
+	        if (stack[pos].lowerCasedTag === lowerCasedTagName) {
 	          break
 	        }
 	      }
@@ -6356,11 +6612,11 @@
 	      // Remove the open elements from the stack
 	      stack.length = pos;
 	      lastTag = pos && stack[pos - 1].tag;
-	    } else if (tagName.toLowerCase() === 'br') {
+	    } else if (lowerCasedTagName === 'br') {
 	      if (options.start) {
 	        options.start(tagName, [], true, start, end);
 	      }
-	    } else if (tagName.toLowerCase() === 'p') {
+	    } else if (lowerCasedTagName === 'p') {
 	      if (options.start) {
 	        options.start(tagName, [], false, start, end);
 	      }
@@ -6413,13 +6669,24 @@
 	        case 0x22: inDouble = true; break         // "
 	        case 0x27: inSingle = true; break         // '
 	        case 0x60: inTemplateString = true; break // `
-	        case 0x2f: inRegex = true; break          // /
 	        case 0x28: paren++; break                 // (
 	        case 0x29: paren--; break                 // )
 	        case 0x5B: square++; break                // [
 	        case 0x5D: square--; break                // ]
 	        case 0x7B: curly++; break                 // {
 	        case 0x7D: curly--; break                 // }
+	      }
+	      if (c === 0x2f) { // /
+	        var j = i - 1;
+	        var p = (void 0);
+	        // find first non-whitespace prev char
+	        for (; j >= 0; j--) {
+	          p = exp.charAt(j);
+	          if (p !== ' ') { break }
+	        }
+	        if (!p || !/[\w$]/.test(p)) {
+	          inRegex = true;
+	        }
 	      }
 	    }
 	  }
@@ -6459,7 +6726,7 @@
 	/*  */
 
 	var defaultTagRE = /\{\{((?:.|\n)+?)\}\}/g;
-	var regexEscapeRE = /[-.*+?^${}()|[\]/\\]/g;
+	var regexEscapeRE = /[-.*+?^${}()|[\]\/\\]/g;
 
 	var buildRegex = cached(function (delimiters) {
 	  var open = delimiters[0].replace(regexEscapeRE, '\\$&');
@@ -6761,7 +7028,7 @@
 	        "development" !== 'production' && warn$1(
 	          'Templates should only be responsible for mapping the state to the ' +
 	          'UI. Avoid placing tags with side-effects in your templates, such as ' +
-	          "<" + tag + ">."
+	          "<" + tag + ">" + ', as they will not be parsed.'
 	        );
 	      }
 
@@ -6898,19 +7165,20 @@
 	          currentParent.attrsMap.placeholder === text) {
 	        return
 	      }
+	      var children = currentParent.children;
 	      text = inPre || text.trim()
 	        ? decodeHTMLCached(text)
 	        // only preserve whitespace if its not right after a starting tag
-	        : preserveWhitespace && currentParent.children.length ? ' ' : '';
+	        : preserveWhitespace && children.length ? ' ' : '';
 	      if (text) {
 	        var expression;
 	        if (!inVPre && text !== ' ' && (expression = parseText(text, delimiters))) {
-	          currentParent.children.push({
+	          children.push({
 	            type: 2,
 	            expression: expression,
 	            text: text
 	          });
-	        } else {
+	        } else if (text !== ' ' || children[children.length - 1].text !== ' ') {
 	          currentParent.children.push({
 	            type: 3,
 	            text: text
@@ -7021,6 +7289,23 @@
 	  }
 	}
 
+	function findPrevElement (children) {
+	  var i = children.length;
+	  while (i--) {
+	    if (children[i].type === 1) {
+	      return children[i]
+	    } else {
+	      if ("development" !== 'production' && children[i].text !== ' ') {
+	        warn$1(
+	          "text \"" + (children[i].text.trim()) + "\" between v-if and v-else(-if) " +
+	          "will be ignored."
+	        );
+	      }
+	      children.pop();
+	    }
+	  }
+	}
+
 	function addIfCondition (el, condition) {
 	  if (!el.ifConditions) {
 	    el.ifConditions = [];
@@ -7083,6 +7368,7 @@
 	      if (bindRE.test(name)) { // v-bind
 	        name = name.replace(bindRE, '');
 	        value = parseFilters(value);
+	        isProp = false;
 	        if (modifiers) {
 	          if (modifiers.prop) {
 	            isProp = true;
@@ -7093,7 +7379,7 @@
 	            name = camelize(name);
 	          }
 	        }
-	        if (isProp || platformMustUseProp(el.tag, name)) {
+	        if (isProp || platformMustUseProp(el.tag, el.attrsMap.type, name)) {
 	          addProp(el, name, value);
 	        } else {
 	          addAttr(el, name, value);
@@ -7160,13 +7446,6 @@
 	    map[attrs[i].name] = attrs[i].value;
 	  }
 	  return map
-	}
-
-	function findPrevElement (children) {
-	  var i = children.length;
-	  while (i--) {
-	    if (children[i].tag) { return children[i] }
-	  }
 	}
 
 	function isForbiddenTag (el) {
@@ -7422,6 +7701,8 @@
 	  };
 	}
 
+	/*  */
+
 	var baseDirectives = {
 	  bind: bind$2,
 	  cloak: noop
@@ -7434,6 +7715,7 @@
 	var transforms$1;
 	var dataGenFns;
 	var platformDirectives$1;
+	var isPlatformReservedTag$1;
 	var staticRenderFns;
 	var onceCount;
 	var currentOptions;
@@ -7452,7 +7734,8 @@
 	  transforms$1 = pluckModuleFunction(options.modules, 'transformCode');
 	  dataGenFns = pluckModuleFunction(options.modules, 'genData');
 	  platformDirectives$1 = options.directives || {};
-	  var code = ast ? genElement(ast) : '_h("div")';
+	  isPlatformReservedTag$1 = options.isReservedTag || no;
+	  var code = ast ? genElement(ast) : '_c("div")';
 	  staticRenderFns = prevStaticRenderFns;
 	  onceCount = prevOnceCount;
 	  return {
@@ -7482,8 +7765,8 @@
 	    } else {
 	      var data = el.plain ? undefined : genData(el);
 
-	      var children = el.inlineTemplate ? null : genChildren(el);
-	      code = "_h('" + (el.tag) + "'" + (data ? ("," + data) : '') + (children ? ("," + children) : '') + ")";
+	      var children = el.inlineTemplate ? null : genChildren(el, true);
+	      code = "_c('" + (el.tag) + "'" + (data ? ("," + data) : '') + (children ? ("," + children) : '') + ")";
 	    }
 	    // module transforms
 	    for (var i = 0; i < transforms$1.length; i++) {
@@ -7680,10 +7963,54 @@
 	      : genElement(el)) + "}"
 	}
 
-	function genChildren (el) {
-	  if (el.children.length) {
-	    return '[' + el.children.map(genNode).join(',') + ']'
+	function genChildren (el, checkSkip) {
+	  var children = el.children;
+	  if (children.length) {
+	    var el$1 = children[0];
+	    // optimize single v-for
+	    if (children.length === 1 &&
+	        el$1.for &&
+	        el$1.tag !== 'template' &&
+	        el$1.tag !== 'slot') {
+	      return genElement(el$1)
+	    }
+	    var normalizationType = getNormalizationType(children);
+	    return ("[" + (children.map(genNode).join(',')) + "]" + (checkSkip
+	        ? normalizationType ? ("," + normalizationType) : ''
+	        : ''))
 	  }
+	}
+
+	// determine the normalization needed for the children array.
+	// 0: no normalization needed
+	// 1: simple normalization needed (possible 1-level deep nested array)
+	// 2: full normalization needed
+	function getNormalizationType (children) {
+	  var res = 0;
+	  for (var i = 0; i < children.length; i++) {
+	    var el = children[i];
+	    if (el.type !== 1) {
+	      continue
+	    }
+	    if (needsNormalization(el) ||
+	        (el.ifConditions && el.ifConditions.some(function (c) { return needsNormalization(c.block); }))) {
+	      res = 2;
+	      break
+	    }
+	    if (maybeComponent(el) ||
+	        (el.ifConditions && el.ifConditions.some(function (c) { return maybeComponent(c.block); }))) {
+	      res = 1;
+	    }
+	  }
+	  return res
+	}
+
+	function needsNormalization (el) {
+	  return el.for !== undefined || el.tag === 'template' || el.tag === 'slot'
+	}
+
+	function maybeComponent (el) {
+	  return !isPlatformReservedTag$1(el.tag)
 	}
 
 	function genNode (node) {
@@ -7695,21 +8022,33 @@
 	}
 
 	function genText (text) {
-	  return text.type === 2
+	  return ("_v(" + (text.type === 2
 	    ? text.expression // no need for () because already wrapped in _s()
-	    : transformSpecialNewlines(JSON.stringify(text.text))
+	    : transformSpecialNewlines(JSON.stringify(text.text))) + ")")
 	}
 
 	function genSlot (el) {
 	  var slotName = el.slotName || '"default"';
 	  var children = genChildren(el);
-	  return ("_t(" + slotName + (children ? ("," + children) : '') + (el.attrs ? ((children ? '' : ',null') + ",{" + (el.attrs.map(function (a) { return ((camelize(a.name)) + ":" + (a.value)); }).join(',')) + "}") : '') + ")")
+	  var res = "_t(" + slotName + (children ? ("," + children) : '');
+	  var attrs = el.attrs && ("{" + (el.attrs.map(function (a) { return ((camelize(a.name)) + ":" + (a.value)); }).join(',')) + "}");
+	  var bind$$1 = el.attrsMap['v-bind'];
+	  if ((attrs || bind$$1) && !children) {
+	    res += ",null";
+	  }
+	  if (attrs) {
+	    res += "," + attrs;
+	  }
+	  if (bind$$1) {
+	    res += (attrs ? '' : ',null') + "," + bind$$1;
+	  }
+	  return res + ')'
 	}
 
 	// componentName is el.component, take it as argument to shun flow's pessimistic refinement
 	function genComponent (componentName, el) {
-	  var children = el.inlineTemplate ? null : genChildren(el);
-	  return ("_h(" + componentName + "," + (genData(el)) + (children ? ("," + children) : '') + ")")
+	  var children = el.inlineTemplate ? null : genChildren(el, true);
+	  return ("_c(" + componentName + "," + (genData(el)) + (children ? ("," + children) : '') + ")")
 	}
 
 	function genProps (props) {
@@ -7968,10 +8307,13 @@
 	  var falseValueBinding = getBindingAttr(el, 'false-value') || 'false';
 	  addProp(el, 'checked',
 	    "Array.isArray(" + value + ")" +
-	      "?_i(" + value + "," + valueBinding + ")>-1" +
-	      ":_q(" + value + "," + trueValueBinding + ")"
+	      "?_i(" + value + "," + valueBinding + ")>-1" + (
+	        trueValueBinding === 'true'
+	          ? (":(" + value + ")")
+	          : (":_q(" + value + "," + trueValueBinding + ")")
+	      )
 	  );
-	  addHandler(el, 'change',
+	  addHandler(el, 'click',
 	    "var $$a=" + value + "," +
 	        '$$el=$event.target,' +
 	        "$$c=$$el.checked?(" + trueValueBinding + "):(" + falseValueBinding + ");" +
@@ -8002,7 +8344,7 @@
 	  var valueBinding = getBindingAttr(el, 'value') || 'null';
 	  valueBinding = number ? ("_n(" + valueBinding + ")") : valueBinding;
 	  addProp(el, 'checked', ("_q(" + value + "," + valueBinding + ")"));
-	  addHandler(el, 'change', genAssignmentCode(value, valueBinding), null, true);
+	  addHandler(el, 'click', genAssignmentCode(value, valueBinding), null, true);
 	}
 
 	function genDefaultModel (
@@ -8042,10 +8384,12 @@
 	  valueExpression = number || type === 'number'
 	    ? ("_n(" + valueExpression + ")")
 	    : valueExpression;
+
 	  var code = genAssignmentCode(value, valueExpression);
 	  if (isNative && needCompositionGuard) {
 	    code = "if($event.target.composing)return;" + code;
 	  }
+
 	  // inputs with type="file" are read only and setting the input's
 	  // value will throw an error.
 	  if ("development" !== 'production' &&
@@ -8055,8 +8399,12 @@
 	      "File inputs are read only. Use a v-on:change listener instead."
 	    );
 	  }
+
 	  addProp(el, 'value', isNative ? ("_s(" + value + ")") : ("(" + value + ")"));
 	  addHandler(el, event, code, null, true);
+	  if (trim || number || type === 'number') {
+	    addHandler(el, 'blur', '$forceUpdate()');
+	  }
 	}
 
 	function genSelect (
@@ -8301,33 +8649,75 @@
 /* 3 */
 /***/ function(module, exports, __webpack_require__) {
 
-	var __vue_exports__, __vue_options__
-	var __vue_styles__ = {}
+	var Component = __webpack_require__(4)(
+	  /* script */
+	  __webpack_require__(5),
+	  /* template */
+	  __webpack_require__(7),
+	  /* scopeId */
+	  null,
+	  /* cssModules */
+	  null
+	)
 
-	/* script */
-	__vue_exports__ = __webpack_require__(4)
-
-	/* template */
-	var __vue_template__ = __webpack_require__(9)
-	__vue_options__ = __vue_exports__ = __vue_exports__ || {}
-	if (
-	  typeof __vue_exports__.default === "object" ||
-	  typeof __vue_exports__.default === "function"
-	) {
-	__vue_options__ = __vue_exports__ = __vue_exports__.default
-	}
-	if (typeof __vue_options__ === "function") {
-	  __vue_options__ = __vue_options__.options
-	}
-
-	__vue_options__.render = __vue_template__.render
-	__vue_options__.staticRenderFns = __vue_template__.staticRenderFns
-
-	module.exports = __vue_exports__
+	module.exports = Component.exports
 
 
 /***/ },
 /* 4 */
+/***/ function(module, exports) {
+
+	module.exports = function normalizeComponent (
+	  rawScriptExports,
+	  compiledTemplate,
+	  scopeId,
+	  cssModules
+	) {
+	  var esModule
+	  var scriptExports = rawScriptExports = rawScriptExports || {}
+
+	  // ES6 modules interop
+	  var type = typeof rawScriptExports.default
+	  if (type === 'object' || type === 'function') {
+	    esModule = rawScriptExports
+	    scriptExports = rawScriptExports.default
+	  }
+
+	  // Vue.extend constructor export interop
+	  var options = typeof scriptExports === 'function'
+	    ? scriptExports.options
+	    : scriptExports
+
+	  // render functions
+	  if (compiledTemplate) {
+	    options.render = compiledTemplate.render
+	    options.staticRenderFns = compiledTemplate.staticRenderFns
+	  }
+
+	  // scopedId
+	  if (scopeId) {
+	    options._scopeId = scopeId
+	  }
+
+	  // inject cssModules
+	  if (cssModules) {
+	    var computed = options.computed || (options.computed = {})
+	    Object.keys(cssModules).forEach(function (key) {
+	      var module = cssModules[key]
+	      computed[key] = function () { return module }
+	    })
+	  }
+
+	  return {
+	    esModule: esModule,
+	    exports: scriptExports,
+	    options: options
+	  }
+	}
+
+
+/***/ },
+/* 5 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -8336,9 +8726,9 @@
 	    value: true
 	});
 
-	var _index = __webpack_require__(5);
+	var _vQrcode = __webpack_require__(6);
 
-	var _index2 = _interopRequireDefault(_index);
+	var _vQrcode2 = _interopRequireDefault(_vQrcode);
 
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -8358,7 +8748,7 @@
 
 
 	    components: {
-	        Qrcode: _index2.default
+	        Qrcode: _vQrcode2.default
 	    }
 	}; //
 	//
@@ -8418,3910 +8808,29 @@
 	//
 	//
 	//
-
-/***/ },
-/* 5 */
-/***/ function(module, exports, __webpack_require__) {
-
-	var __vue_exports__, __vue_options__
-	var __vue_styles__ = {}
-
-	/* script */
-	__vue_exports__ = __webpack_require__(6)
-
-	/* template */
-	var __vue_template__ = __webpack_require__(8)
-	__vue_options__ = __vue_exports__ = __vue_exports__ || {}
-	if (
-	  typeof __vue_exports__.default === "object" ||
-	  typeof __vue_exports__.default === "function"
-	) {
-	__vue_options__ = __vue_exports__ = __vue_exports__.default
-	}
-	if (typeof __vue_options__ === "function") {
-	  __vue_options__ = __vue_options__.options
-	}
-
-	__vue_options__.render = __vue_template__.render
-	__vue_options__.staticRenderFns = __vue_template__.staticRenderFns
-
-	module.exports = __vue_exports__
-
 
 /***/ },
 /* 6 */
-/***/ function(module, exports, __webpack_require__) {
+/***/ function(module, exports) {
 
-	'use strict';
-
-	Object.defineProperty(exports, "__esModule", {
-	    value: true
-	});
-
-	var _qrious = __webpack_require__(7);
-
-	var _qrious2 = _interopRequireDefault(_qrious);
-
-	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-	exports.default = {
-	    props: {
-	        value: String,
-
-	        cls: {
-	            type: String,
-	            default: ''
-	        },
-
-	        elem: {
-	            type: String,
-
-	            default: null,
-
-	            validator: function validator(value) {
-	                var node = document.querySelector(value);
-
-	                var nodeName = node && node.nodeName && node.nodeName.toLowerCase();
-
-	                return ['img', 'canvas', null].indexOf(nodeName) > -1;
-	            }
-	        },
-
-	        size: {
-	            type: [Number, String],
-	            default: 100
-	        },
-
-	        level: {
-	            type: String,
-	            default: 'L'
-	        },
-
-	        background: {
-	            type: String,
-	            default: '#fff'
-	        },
-
-	        foreground: {
-	            type: String,
-	            default: '#000'
-	        },
-
-	        mime: {
-	            type: String,
-	            default: 'image/png'
-	        },
-
-	        padding: {
-	            type: [Number, String],
-	            default: 0
-	        },
-
-	        type: {
-	            type: String,
-	            default: 'canvas'
-	        }
-	    },
-
-	    methods: {
-	        render: function render() {
-	            var qr = new _qrious2.default({
-	                element: document.querySelector(this.elem),
-	                background: this.background,
-	                foreground: this.foreground,
-	                level: this.level,
-	                mime: this.mime,
-	                padding: this.padding,
-	                size: this.size,
-	                value: this.value
-	            });
-
-	            this.$el.innerHTML = '';
-
-	            this.$el.appendChild(qr[this.type]);
-	        }
-	    },
-
-	    mounted: function mounted() {
-	        this.render();
-
-	        this.$watch(function () {
-	            return this.value + this.size + this.level + this.background + this.foreground + this.mime + this.padding + this.type;
-	        }, this.render);
-	    }
-	}; //
-	//
-	//
-	//
+	/*! (c) 2017 wxp. All Rights Reserved */
+	!function(t,e){"object"==typeof exports&&"object"==typeof module?module.exports=e():"function"==typeof define&&define.amd?define([],e):"object"==typeof exports?exports.VQrcode=e():t.VQrcode=e()}(this,function(){return function(t){function e(r){if(n[r])return n[r].exports;var i=n[r]={exports:{},id:r,loaded:!1};return t[r].call(i.exports,i,i.exports,e),i.loaded=!0,i.exports}var n={};return e.m=t,e.c=n,e.p="",e(0)}([function(t,e,n){"use strict";function r(t){return t&&t.__esModule?t:{default:t}}Object.defineProperty(e,"__esModule",{value:!0}),e.qrcode=void 0;var i=n(3),s=r(i);e.default=s.default,e.qrcode=s.default},function(t,e,n){"use strict";function r(t){return t&&t.__esModule?t:{default:t}}Object.defineProperty(e,"__esModule",{value:!0});var i=n(2),s=r(i);e.default={props:{value:{type:String,required:!0,default:""},cls:{type:String,default:""},size:{type:Number,default:100},level:{type:String,default:"L",validator:function(t){return["L","Q","M","H"].indexOf(t)>-1}},background:{type:String,default:"#fff"},foreground:{type:String,default:"#000"},mime:{type:String,default:"image/png"},padding:{type:Number,default:0},type:{type:String,default:"canvas",validator:function(t){return["canvas","image"].indexOf(t)>-1}}},methods:{render:function(){var t=new s.default({background:this.background,foreground:this.foreground,level:this.level,mime:this.mime,padding:this.padding,size:this.size,value:this.value});this.$el.innerHTML="",this.$el.appendChild(t[this.type])}},mounted:function(){var t=this;this.render(),this.$options._propKeys.forEach(function(e){return t.$watch(e,t.render)})}}},function(t,e,n){!function(e,n){t.exports=n()}(this,function(){"use strict";function t(t){return t&&t.__esModule?t.default:t}function e(t,e){return e={exports:{}},t(e,e.exports),e.exports}var n=function(t){if(void 0==t)throw TypeError("Can't call method on  "+t);return t},r=n,i=function(t){return Object(r(t))},s={}.hasOwnProperty,o=function(t,e){return s.call(t,e)},u=e(function(t){var e=t.exports="undefined"!=typeof window&&window.Math==Math?window:"undefined"!=typeof self&&self.Math==Math?self:Function("return this")();"number"==typeof __g&&(__g=e)}),a=u,f="__core-js_shared__",c=a[f]||(a[f]={}),h=function(t){return c[t]||(c[t]={})},l=0,d=Math.random(),_=function(t){return"Symbol(".concat(void 0===t?"":t,")_",(++l+d).toString(36))},v=h("keys"),p=_,y=function(t){return v[t]||(v[t]=p(t))},g=o,b=i,k=y("IE_PROTO"),m=Object.prototype,w=Object.getPrototypeOf||function(t){return t=b(t),g(t,k)?t[k]:"function"==typeof t.constructor&&t instanceof t.constructor?t.constructor.prototype:t instanceof Object?m:null},O=e(function(t){var e=t.exports={version:"2.4.0"};"number"==typeof __e&&(__e=e)}),B=function(t){if("function"!=typeof t)throw TypeError(t+" is not a function!");return t},M=B,S=function(t,e,n){if(M(t),void 0===e)return t;switch(n){case 1:return function(n){return t.call(e,n)};case 2:return function(n,r){return t.call(e,n,r)};case 3:return function(n,r,i){return t.call(e,n,r,i)}}return function(){return t.apply(e,arguments)}},E=function(t){return"object"==typeof t?null!==t:"function"==typeof t},j=E,A=function(t){if(!j(t))throw TypeError(t+" is not an object!");return t},L=function(t){try{return!!t()}catch(t){return!0}},x=!L(function(){return 7!=Object.defineProperty({},"a",{get:function(){return 7}}).a}),N=E,P=u.document,T=N(P)&&N(P.createElement),F=function(t){return T?P.createElement(t):{}},C=!x&&!L(function(){return 7!=Object.defineProperty(F("div"),"a",{get:function(){return 7}}).a}),z=E,U=function(t,e){if(!z(t))return t;var n,r;if(e&&"function"==typeof(n=t.toString)&&!z(r=n.call(t)))return r;if("function"==typeof(n=t.valueOf)&&!z(r=n.call(t)))return r;if(!e&&"function"==typeof(n=t.toString)&&!z(r=n.call(t)))return r;throw TypeError("Can't convert object to primitive value")},I=A,D=C,R=U,q=Object.defineProperty,K=x?Object.defineProperty:function(t,e,n){if(I(t),e=R(e,!0),I(n),D)try{return q(t,e,n)}catch(t){}if("get"in n||"set"in n)throw TypeError("Accessors not supported!");return"value"in n&&(t[e]=n.value),t},G={f:K},V=function(t,e){return{enumerable:!(1&t),configurable:!(2&t),writable:!(4&t),value:e}},W=G,H=V,Q=x?function(t,e,n){return W.f(t,e,H(1,n))}:function(t,e,n){return t[e]=n,t},X=u,$=O,J=S,Y=Q,Z="prototype",tt=function(t,e,n){var r,i,s,o=t&tt.F,u=t&tt.G,a=t&tt.S,f=t&tt.P,c=t&tt.B,h=t&tt.W,l=u?$:$[e]||($[e]={}),d=l[Z],_=u?X:a?X[e]:(X[e]||{})[Z];u&&(n=e);for(r in n)i=!o&&_&&void 0!==_[r],i&&r in l||(s=i?_[r]:n[r],l[r]=u&&"function"!=typeof _[r]?n[r]:c&&i?J(s,X):h&&_[r]==s?function(t){var e=function(e,n,r){if(this instanceof t){switch(arguments.length){case 0:return new t;case 1:return new t(e);case 2:return new t(e,n)}return new t(e,n,r)}return t.apply(this,arguments)};return e[Z]=t[Z],e}(s):f&&"function"==typeof s?J(Function.call,s):s,f&&((l.virtual||(l.virtual={}))[r]=s,t&tt.R&&d&&!d[r]&&Y(d,r,s)))};tt.F=1,tt.G=2,tt.S=4,tt.P=8,tt.B=16,tt.W=32,tt.U=64,tt.R=128;var et=tt,nt=et,rt=O,it=L,st=function(t,e){var n=(rt.Object||{})[t]||Object[t],r={};r[t]=e(n),nt(nt.S+nt.F*it(function(){n(1)}),"Object",r)},ot=i,ut=w;st("getPrototypeOf",function(){return function(t){return ut(ot(t))}});var at=O.Object.getPrototypeOf,ft=e(function(t){t.exports={default:at,__esModule:!0}}),ct=t(ft),ht=e(function(t,e){e.__esModule=!0,e.default=function(t,e){if(!(t instanceof e))throw new TypeError("Cannot call a class as a function")}}),lt=t(ht),dt=et;dt(dt.S+dt.F*!x,"Object",{defineProperty:G.f});var _t=O.Object,vt=function(t,e,n){return _t.defineProperty(t,e,n)},pt=e(function(t){t.exports={default:vt,__esModule:!0}}),yt=e(function(t,e){function n(t){return t&&t.__esModule?t:{default:t}}e.__esModule=!0;var r=pt,i=n(r);e.default=function(){function t(t,e){for(var n=0;n<e.length;n++){var r=e[n];r.enumerable=r.enumerable||!1,r.configurable=!0,"value"in r&&(r.writable=!0),(0,i.default)(t,r.key,r)}}return function(e,n,r){return n&&t(e.prototype,n),r&&t(e,r),e}}()}),gt=t(yt),bt=Math.ceil,kt=Math.floor,mt=function(t){return isNaN(t=+t)?0:(t>0?kt:bt)(t)},wt=mt,Ot=n,Bt=function(t){return function(e,n){var r,i,s=String(Ot(e)),o=wt(n),u=s.length;return o<0||o>=u?t?"":void 0:(r=s.charCodeAt(o),r<55296||r>56319||o+1===u||(i=s.charCodeAt(o+1))<56320||i>57343?t?s.charAt(o):r:t?s.slice(o,o+2):(r-55296<<10)+(i-56320)+65536)}},Mt=!0,St=Q,Et={},jt={}.toString,At=function(t){return jt.call(t).slice(8,-1)},Lt=At,xt=Object("z").propertyIsEnumerable(0)?Object:function(t){return"String"==Lt(t)?t.split(""):Object(t)},Nt=xt,Pt=n,Tt=function(t){return Nt(Pt(t))},Ft=mt,Ct=Math.min,zt=function(t){return t>0?Ct(Ft(t),9007199254740991):0},Ut=mt,It=Math.max,Dt=Math.min,Rt=function(t,e){return t=Ut(t),t<0?It(t+e,0):Dt(t,e)},qt=Tt,Kt=zt,Gt=Rt,Vt=function(t){return function(e,n,r){var i,s=qt(e),o=Kt(s.length),u=Gt(r,o);if(t&&n!=n){for(;o>u;)if(i=s[u++],i!=i)return!0}else for(;o>u;u++)if((t||u in s)&&s[u]===n)return t||u||0;return!t&&-1}},Wt=o,Ht=Tt,Qt=Vt(!1),Xt=y("IE_PROTO"),$t=function(t,e){var n,r=Ht(t),i=0,s=[];for(n in r)n!=Xt&&Wt(r,n)&&s.push(n);for(;e.length>i;)Wt(r,n=e[i++])&&(~Qt(s,n)||s.push(n));return s},Jt="constructor,hasOwnProperty,isPrototypeOf,propertyIsEnumerable,toLocaleString,toString,valueOf".split(","),Yt=$t,Zt=Jt,te=Object.keys||function(t){return Yt(t,Zt)},ee=G,ne=A,re=te,ie=x?Object.defineProperties:function(t,e){ne(t);for(var n,r=re(e),i=r.length,s=0;i>s;)ee.f(t,n=r[s++],e[n]);return t},se=u.document&&document.documentElement,oe=A,ue=ie,ae=Jt,fe=y("IE_PROTO"),ce=function(){},he="prototype",le=function(){var t,e=F("iframe"),n=ae.length,r="<",i=">";for(e.style.display="none",se.appendChild(e),e.src="javascript:",t=e.contentWindow.document,t.open(),t.write(r+"script"+i+"document.F=Object"+r+"/script"+i),t.close(),le=t.F;n--;)delete le[he][ae[n]];return le()},de=Object.create||function(t,e){var n;return null!==t?(ce[he]=oe(t),n=new ce,ce[he]=null,n[fe]=t):n=le(),void 0===e?n:ue(n,e)},_e=e(function(t){var e=h("wks"),n=_,r=u.Symbol,i="function"==typeof r,s=t.exports=function(t){return e[t]||(e[t]=i&&r[t]||(i?r:n)("Symbol."+t))};s.store=e}),ve=G.f,pe=o,ye=_e("toStringTag"),ge=function(t,e,n){t&&!pe(t=n?t:t.prototype,ye)&&ve(t,ye,{configurable:!0,value:e})},be=de,ke=V,me=ge,we={};Q(we,_e("iterator"),function(){return this});var Oe=function(t,e,n){t.prototype=be(we,{next:ke(1,n)}),me(t,e+" Iterator")},Be=Mt,Me=et,Se=St,Ee=Q,je=o,Ae=Et,Le=Oe,xe=ge,Ne=w,Pe=_e("iterator"),Te=!([].keys&&"next"in[].keys()),Fe="@@iterator",Ce="keys",ze="values",Ue=function(){return this},Ie=function(t,e,n,r,i,s,o){Le(n,e,r);var u,a,f,c=function(t){if(!Te&&t in _)return _[t];switch(t){case Ce:return function(){return new n(this,t)};case ze:return function(){return new n(this,t)}}return function(){return new n(this,t)}},h=e+" Iterator",l=i==ze,d=!1,_=t.prototype,v=_[Pe]||_[Fe]||i&&_[i],p=v||c(i),y=i?l?c("entries"):p:void 0,g="Array"==e?_.entries||v:v;if(g&&(f=Ne(g.call(new t)),f!==Object.prototype&&(xe(f,h,!0),Be||je(f,Pe)||Ee(f,Pe,Ue))),l&&v&&v.name!==ze&&(d=!0,p=function(){return v.call(this)}),Be&&!o||!Te&&!d&&_[Pe]||Ee(_,Pe,p),Ae[e]=p,Ae[h]=Ue,i)if(u={values:l?p:c(ze),keys:s?p:c(Ce),entries:y},o)for(a in u)a in _||Se(_,a,u[a]);else Me(Me.P+Me.F*(Te||d),e,u);return u},De=Bt(!0);Ie(String,"String",function(t){this._t=String(t),this._i=0},function(){var t,e=this._t,n=this._i;return n>=e.length?{value:void 0,done:!0}:(t=De(e,n),this._i+=t.length,{value:t,done:!1})});var Re=function(){},qe=function(t,e){return{value:e,done:!!t}},Ke=Re,Ge=qe,Ve=Et,We=Tt;Ie(Array,"Array",function(t,e){this._t=We(t),this._i=0,this._k=e},function(){var t=this._t,e=this._k,n=this._i++;return!t||n>=t.length?(this._t=void 0,Ge(1)):"keys"==e?Ge(0,n):"values"==e?Ge(0,t[n]):Ge(0,[n,t[n]])},"values");Ve.Arguments=Ve.Array,Ke("keys"),Ke("values"),Ke("entries");for(var He=u,Qe=Q,Xe=Et,$e=_e("toStringTag"),Je=["NodeList","DOMTokenList","MediaList","StyleSheetList","CSSRuleList"],Ye=0;Ye<5;Ye++){var Ze=Je[Ye],tn=He[Ze],en=tn&&tn.prototype;en&&!en[$e]&&Qe(en,$e,Ze),Xe[Ze]=Xe.Array}var nn=_e,rn={f:nn},sn=rn.f("iterator"),on=e(function(t){t.exports={default:sn,__esModule:!0}}),un=e(function(t){var e=_("meta"),n=E,r=o,i=G.f,s=0,u=Object.isExtensible||function(){return!0},a=!L(function(){return u(Object.preventExtensions({}))}),f=function(t){i(t,e,{value:{i:"O"+ ++s,w:{}}})},c=function(t,i){if(!n(t))return"symbol"==typeof t?t:("string"==typeof t?"S":"P")+t;if(!r(t,e)){if(!u(t))return"F";if(!i)return"E";f(t)}return t[e].i},h=function(t,n){if(!r(t,e)){if(!u(t))return!0;if(!n)return!1;f(t)}return t[e].w},l=function(t){return a&&d.NEED&&u(t)&&!r(t,e)&&f(t),t},d=t.exports={KEY:e,NEED:!1,fastKey:c,getWeak:h,onFreeze:l}}),an=u,fn=O,cn=Mt,hn=rn,ln=G.f,dn=function(t){var e=fn.Symbol||(fn.Symbol=cn?{}:an.Symbol||{});"_"==t.charAt(0)||t in e||ln(e,t,{value:hn.f(t)})},_n=te,vn=Tt,pn=function(t,e){for(var n,r=vn(t),i=_n(r),s=i.length,o=0;s>o;)if(r[n=i[o++]]===e)return n},yn=Object.getOwnPropertySymbols,gn={f:yn},bn={}.propertyIsEnumerable,kn={f:bn},mn=te,wn=gn,On=kn,Bn=function(t){var e=mn(t),n=wn.f;if(n)for(var r,i=n(t),s=On.f,o=0;i.length>o;)s.call(t,r=i[o++])&&e.push(r);return e},Mn=At,Sn=Array.isArray||function(t){return"Array"==Mn(t)},En=$t,jn=Jt.concat("length","prototype"),An=Object.getOwnPropertyNames||function(t){return En(t,jn)},Ln={f:An},xn=Tt,Nn=Ln.f,Pn={}.toString,Tn="object"==typeof window&&window&&Object.getOwnPropertyNames?Object.getOwnPropertyNames(window):[],Fn=function(t){try{return Nn(t)}catch(t){return Tn.slice()}},Cn=function(t){return Tn&&"[object Window]"==Pn.call(t)?Fn(t):Nn(xn(t))},zn={f:Cn},Un=kn,In=V,Dn=Tt,Rn=U,qn=o,Kn=C,Gn=Object.getOwnPropertyDescriptor,Vn=x?Gn:function(t,e){if(t=Dn(t),e=Rn(e,!0),Kn)try{return Gn(t,e)}catch(t){}if(qn(t,e))return In(!Un.f.call(t,e),t[e])},Wn={f:Vn},Hn=u,Qn=o,Xn=x,$n=et,Jn=St,Yn=un.KEY,Zn=L,tr=h,er=ge,nr=_,rr=_e,ir=rn,sr=dn,or=pn,ur=Bn,ar=Sn,fr=A,cr=Tt,hr=U,lr=V,dr=de,_r=zn,vr=Wn,pr=G,yr=te,gr=vr.f,br=pr.f,kr=_r.f,mr=Hn.Symbol,wr=Hn.JSON,Or=wr&&wr.stringify,Br="prototype",Mr=rr("_hidden"),Sr=rr("toPrimitive"),Er={}.propertyIsEnumerable,jr=tr("symbol-registry"),Ar=tr("symbols"),Lr=tr("op-symbols"),xr=Object[Br],Nr="function"==typeof mr,Pr=Hn.QObject,Tr=!Pr||!Pr[Br]||!Pr[Br].findChild,Fr=Xn&&Zn(function(){return 7!=dr(br({},"a",{get:function(){return br(this,"a",{value:7}).a}})).a})?function(t,e,n){var r=gr(xr,e);r&&delete xr[e],br(t,e,n),r&&t!==xr&&br(xr,e,r)}:br,Cr=function(t){var e=Ar[t]=dr(mr[Br]);return e._k=t,e},zr=Nr&&"symbol"==typeof mr.iterator?function(t){return"symbol"==typeof t}:function(t){return t instanceof mr},Ur=function(t,e,n){return t===xr&&Ur(Lr,e,n),fr(t),e=hr(e,!0),fr(n),Qn(Ar,e)?(n.enumerable?(Qn(t,Mr)&&t[Mr][e]&&(t[Mr][e]=!1),n=dr(n,{enumerable:lr(0,!1)})):(Qn(t,Mr)||br(t,Mr,lr(1,{})),t[Mr][e]=!0),Fr(t,e,n)):br(t,e,n)},Ir=function(t,e){fr(t);for(var n,r=ur(e=cr(e)),i=0,s=r.length;s>i;)Ur(t,n=r[i++],e[n]);return t},Dr=function(t,e){return void 0===e?dr(t):Ir(dr(t),e)},Rr=function(t){var e=Er.call(this,t=hr(t,!0));return!(this===xr&&Qn(Ar,t)&&!Qn(Lr,t))&&(!(e||!Qn(this,t)||!Qn(Ar,t)||Qn(this,Mr)&&this[Mr][t])||e)},qr=function(t,e){if(t=cr(t),e=hr(e,!0),t!==xr||!Qn(Ar,e)||Qn(Lr,e)){var n=gr(t,e);return!n||!Qn(Ar,e)||Qn(t,Mr)&&t[Mr][e]||(n.enumerable=!0),n}},Kr=function(t){for(var e,n=kr(cr(t)),r=[],i=0;n.length>i;)Qn(Ar,e=n[i++])||e==Mr||e==Yn||r.push(e);return r},Gr=function(t){for(var e,n=t===xr,r=kr(n?Lr:cr(t)),i=[],s=0;r.length>s;)!Qn(Ar,e=r[s++])||n&&!Qn(xr,e)||i.push(Ar[e]);return i};Nr||(mr=function(){if(this instanceof mr)throw TypeError("Symbol is not a constructor!");var t=nr(arguments.length>0?arguments[0]:void 0),e=function(n){this===xr&&e.call(Lr,n),Qn(this,Mr)&&Qn(this[Mr],t)&&(this[Mr][t]=!1),Fr(this,t,lr(1,n))};return Xn&&Tr&&Fr(xr,t,{configurable:!0,set:e}),Cr(t)},Jn(mr[Br],"toString",function(){return this._k}),vr.f=qr,pr.f=Ur,Ln.f=_r.f=Kr,kn.f=Rr,gn.f=Gr,Xn&&!Mt&&Jn(xr,"propertyIsEnumerable",Rr,!0),ir.f=function(t){return Cr(rr(t))}),$n($n.G+$n.W+$n.F*!Nr,{Symbol:mr});for(var Vr="hasInstance,isConcatSpreadable,iterator,match,replace,search,species,split,toPrimitive,toStringTag,unscopables".split(","),Wr=0;Vr.length>Wr;)rr(Vr[Wr++]);for(var Vr=yr(rr.store),Wr=0;Vr.length>Wr;)sr(Vr[Wr++]);$n($n.S+$n.F*!Nr,"Symbol",{for:function(t){return Qn(jr,t+="")?jr[t]:jr[t]=mr(t)},keyFor:function(t){if(zr(t))return or(jr,t);throw TypeError(t+" is not a symbol!")},useSetter:function(){Tr=!0},useSimple:function(){Tr=!1}}),$n($n.S+$n.F*!Nr,"Object",{create:Dr,defineProperty:Ur,defineProperties:Ir,getOwnPropertyDescriptor:qr,getOwnPropertyNames:Kr,getOwnPropertySymbols:Gr}),wr&&$n($n.S+$n.F*(!Nr||Zn(function(){var t=mr();return"[null]"!=Or([t])||"{}"!=Or({a:t})||"{}"!=Or(Object(t))})),"JSON",{stringify:function(t){if(void 0!==t&&!zr(t)){for(var e,n,r=[t],i=1;arguments.length>i;)r.push(arguments[i++]);return e=r[1],"function"==typeof e&&(n=e),!n&&ar(e)||(e=function(t,e){if(n&&(e=n.call(this,t,e)),!zr(e))return e}),r[1]=e,Or.apply(wr,r)}}}),mr[Br][Sr]||Q(mr[Br],Sr,mr[Br].valueOf),er(mr,"Symbol"),er(Math,"Math",!0),er(Hn.JSON,"JSON",!0),dn("asyncIterator"),dn("observable");var Hr=O.Symbol,Qr=e(function(t){t.exports={default:Hr,__esModule:!0}}),Xr=e(function(t,e){function n(t){return t&&t.__esModule?t:{default:t}}e.__esModule=!0;var r=on,i=n(r),s=Qr,o=n(s),u="function"==typeof o.default&&"symbol"==typeof i.default?function(t){return typeof t}:function(t){return t&&"function"==typeof o.default&&t.constructor===o.default&&t!==o.default.prototype?"symbol":typeof t};e.default="function"==typeof o.default&&"symbol"===u(i.default)?function(t){return"undefined"==typeof t?"undefined":u(t)}:function(t){return t&&"function"==typeof o.default&&t.constructor===o.default&&t!==o.default.prototype?"symbol":"undefined"==typeof t?"undefined":u(t)}}),$r=e(function(t,e){function n(t){return t&&t.__esModule?t:{default:t}}e.__esModule=!0;var r=Xr,i=n(r);e.default=function(t,e){if(!t)throw new ReferenceError("this hasn't been initialised - super() hasn't been called");return!e||"object"!==("undefined"==typeof e?"undefined":(0,i.default)(e))&&"function"!=typeof e?t:e}}),Jr=t($r),Yr=E,Zr=A,ti=function(t,e){if(Zr(t),!Yr(e)&&null!==e)throw TypeError(e+": can't set as prototype!")},ei={set:Object.setPrototypeOf||("__proto__"in{}?function(t,e,n){try{n=S(Function.call,Wn.f(Object.prototype,"__proto__").set,2),n(t,[]),e=!(t instanceof Array)}catch(t){e=!0}return function(t,r){return ti(t,r),e?t.__proto__=r:n(t,r),t}}({},!1):void 0),check:ti},ni=et;ni(ni.S,"Object",{setPrototypeOf:ei.set});var ri=O.Object.setPrototypeOf,ii=e(function(t){t.exports={default:ri,__esModule:!0}}),si=et;si(si.S,"Object",{create:de});var oi=O.Object,ui=function(t,e){return oi.create(t,e)},ai=e(function(t){t.exports={default:ui,__esModule:!0}}),fi=e(function(t,e){function n(t){return t&&t.__esModule?t:{default:t}}e.__esModule=!0;var r=ii,i=n(r),s=ai,o=n(s),u=Xr,a=n(u);e.default=function(t,e){if("function"!=typeof e&&null!==e)throw new TypeError("Super expression must either be null or a function, not "+("undefined"==typeof e?"undefined":(0,a.default)(e)));t.prototype=(0,o.default)(e&&e.prototype,{constructor:{value:t,enumerable:!1,writable:!0,configurable:!0}}),e&&(i.default?(0,i.default)(t,e):t.__proto__=e)}}),ci=t(fi),hi=function(){function t(){lt(this,t)}return gt(t,null,[{key:"abs",value:function(t){return null!=t?Math.abs(t):null}},{key:"privatize",value:function(t,e){for(var n in e)Object.prototype.hasOwnProperty.call(e,n)&&(t["_"+n]=e[n]);return t}},{key:"setter",value:function(t,e,n,r,i){var s=t[e],o=null!=n?n:r;return"function"==typeof i&&(o=i(o)),t[e]=o,o!==s}},{key:"throwUnimplemented",value:function(t,e){throw new Error('"'+e+'" method must be implemented on the '+t+" class")}},{key:"toUpperCase",value:function(t){return null!=t&&t.toUpperCase()}}]),t}(),li=function(){function t(){lt(this,t)}return gt(t,[{key:"getName",value:function(){hi.throwUnimplemented("Service","getName")}}]),t}(),di=function(t){function e(){return lt(this,e),Jr(this,(e.__proto__||ct(e)).apply(this,arguments))}return ci(e,t),gt(e,[{key:"createCanvas",value:function(){hi.throwUnimplemented("ElementService","createCanvas")}},{key:"createImage",value:function(){hi.throwUnimplemented("ElementService","createImage")}},{key:"getName",value:function(){return"element"}},{key:"isCanvas",value:function(t){hi.throwUnimplemented("ElementService","isCanvas")}},{key:"isImage",value:function(t){hi.throwUnimplemented("ElementService","isImage")}}]),e}(li),_i=function(t){function e(){return lt(this,e),Jr(this,(e.__proto__||ct(e)).apply(this,arguments))}return ci(e,t),gt(e,[{key:"createCanvas",value:function(){return document.createElement("canvas")}},{key:"createImage",value:function(){return document.createElement("img")}},{key:"isCanvas",value:function(t){return t instanceof HTMLCanvasElement}},{key:"isImage",value:function(t){return t instanceof HTMLImageElement}}]),e}(di),vi=te,pi=gn,yi=kn,gi=i,bi=xt,ki=Object.assign,mi=!ki||L(function(){var t={},e={},n=Symbol(),r="abcdefghijklmnopqrst";return t[n]=7,r.split("").forEach(function(t){e[t]=t}),7!=ki({},t)[n]||Object.keys(ki({},e)).join("")!=r})?function(t,e){for(var n=gi(t),r=arguments.length,i=1,s=pi.f,o=yi.f;r>i;)for(var u,a=bi(arguments[i++]),f=s?vi(a).concat(s(a)):vi(a),c=f.length,h=0;c>h;)o.call(a,u=f[h++])&&(n[u]=a[u]);return n}:ki,wi=et;wi(wi.S+wi.F,"Object",{assign:mi});var Oi=O.Object.assign,Bi=e(function(t){t.exports={default:Oi,__esModule:!0}}),Mi=t(Bi),Si=function(){function t(e){lt(this,t),this.qrious=e}return gt(t,[{key:"draw",value:function(t){hi.throwUnimplemented("Renderer","draw")}},{key:"getModuleSize",value:function(t){var e=this.qrious.padding||0,n=Math.floor((this.qrious.size-2*e)/t.width);return Math.max(1,n)}},{key:"getOffset",value:function(t){if(null!=this.qrious.padding)return this.qrious.padding;var e=this.getModuleSize(t),n=Math.floor((this.qrious.size-e*t.width)/2);return Math.max(0,n)}},{key:"render",value:function(t){this.resize(),this.reset(),this.draw(t)}},{key:"reset",value:function(){hi.throwUnimplemented("Renderer","reset")}},{key:"resize",value:function(){hi.throwUnimplemented("Renderer","resize")}}]),t}(),Ei=function(t){function e(){return lt(this,e),Jr(this,(e.__proto__||ct(e)).apply(this,arguments))}return ci(e,t),gt(e,[{key:"draw",value:function(t){var e=this.qrious,n=this.getModuleSize(t),r=this.getOffset(t),i=e.canvas.getContext("2d");i.fillStyle=e.foreground,i.globalAlpha=e.foregroundAlpha;for(var s=0;s<t.width;s++)for(var o=0;o<t.width;o++)t.buffer[o*t.width+s]&&i.fillRect(n*s+r,n*o+r,n,n)}},{key:"reset",value:function(){var t=this.qrious,e=t.canvas.getContext("2d");e.lineWidth=1,e.clearRect(0,0,t.size,t.size),e.fillStyle=t.background,e.globalAlpha=t.backgroundAlpha,e.fillRect(0,0,t.size,t.size)}},{key:"resize",value:function(){var t=this.qrious,e=t.canvas;e.width=t.size,e.height=t.size}}]),e}(Si),ji=function(){function t(){lt(this,t)}return gt(t,null,[{key:"BLOCK",get:function(){return[0,11,15,19,23,27,31,16,18,20,22,24,26,28,20,22,24,24,26,28,28,22,24,24,26,26,28,28,24,24,26,26,26,28,28,24,26,26,26,28,28]}}]),t}(),Ai=function(){function t(){lt(this,t)}return gt(t,null,[{key:"BLOCKS",get:function(){return[1,0,19,7,1,0,16,10,1,0,13,13,1,0,9,17,1,0,34,10,1,0,28,16,1,0,22,22,1,0,16,28,1,0,55,15,1,0,44,26,2,0,17,18,2,0,13,22,1,0,80,20,2,0,32,18,2,0,24,26,4,0,9,16,1,0,108,26,2,0,43,24,2,2,15,18,2,2,11,22,2,0,68,18,4,0,27,16,4,0,19,24,4,0,15,28,2,0,78,20,4,0,31,18,2,4,14,18,4,1,13,26,2,0,97,24,2,2,38,22,4,2,18,22,4,2,14,26,2,0,116,30,3,2,36,22,4,4,16,20,4,4,12,24,2,2,68,18,4,1,43,26,6,2,19,24,6,2,15,28,4,0,81,20,1,4,50,30,4,4,22,28,3,8,12,24,2,2,92,24,6,2,36,22,4,6,20,26,7,4,14,28,4,0,107,26,8,1,37,22,8,4,20,24,12,4,11,22,3,1,115,30,4,5,40,24,11,5,16,20,11,5,12,24,5,1,87,22,5,5,41,24,5,7,24,30,11,7,12,24,5,1,98,24,7,3,45,28,15,2,19,24,3,13,15,30,1,5,107,28,10,1,46,28,1,15,22,28,2,17,14,28,5,1,120,30,9,4,43,26,17,1,22,28,2,19,14,28,3,4,113,28,3,11,44,26,17,4,21,26,9,16,13,26,3,5,107,28,3,13,41,26,15,5,24,30,15,10,15,28,4,4,116,28,17,0,42,26,17,6,22,28,19,6,16,30,2,7,111,28,17,0,46,28,7,16,24,30,34,0,13,24,4,5,121,30,4,14,47,28,11,14,24,30,16,14,15,30,6,4,117,30,6,14,45,28,11,16,24,30,30,2,16,30,8,4,106,26,8,13,47,28,7,22,24,30,22,13,15,30,10,2,114,28,19,4,46,28,28,6,22,28,33,4,16,30,8,4,122,30,22,3,45,28,8,26,23,30,12,28,15,30,3,10,117,30,3,23,45,28,4,31,24,30,11,31,15,30,7,7,116,30,21,7,45,28,1,37,23,30,19,26,15,30,5,10,115,30,19,10,47,28,15,25,24,30,23,25,15,30,13,3,115,30,2,29,46,28,42,1,24,30,23,28,15,30,17,0,115,30,10,23,46,28,10,35,24,30,19,35,15,30,17,1,115,30,14,21,46,28,29,19,24,30,11,46,15,30,13,6,115,30,14,23,46,28,44,7,24,30,59,1,16,30,12,7,121,30,12,26,47,28,39,14,24,30,22,41,15,30,6,14,121,30,6,34,47,28,46,10,24,30,2,64,15,30,17,4,122,30,29,14,46,28,49,10,24,30,24,46,15,30,4,18,122,30,13,32,46,28,48,14,24,30,42,32,15,30,20,4,117,30,40,7,47,28,43,22,24,30,10,67,15,30,19,6,118,30,18,31,47,28,34,34,24,30,20,61,15,30]}},{key:"FINAL_FORMAT",get:function(){return[30660,29427,32170,30877,26159,25368,27713,26998,21522,20773,24188,23371,17913,16590,20375,19104,13663,12392,16177,14854,9396,8579,11994,11245,5769,5054,7399,6608,1890,597,3340,2107]}},{key:"LEVELS",get:function(){return{L:1,M:2,Q:3,H:4}}}]),t}(),Li=function(){function t(){lt(this,t)}return gt(t,null,[{key:"EXPONENT",get:function(){return[1,2,4,8,16,32,64,128,29,58,116,232,205,135,19,38,76,152,45,90,180,117,234,201,143,3,6,12,24,48,96,192,157,39,78,156,37,74,148,53,106,212,181,119,238,193,159,35,70,140,5,10,20,40,80,160,93,186,105,210,185,111,222,161,95,190,97,194,153,47,94,188,101,202,137,15,30,60,120,240,253,231,211,187,107,214,177,127,254,225,223,163,91,182,113,226,217,175,67,134,17,34,68,136,13,26,52,104,208,189,103,206,129,31,62,124,248,237,199,147,59,118,236,197,151,51,102,204,133,23,46,92,184,109,218,169,79,158,33,66,132,21,42,84,168,77,154,41,82,164,85,170,73,146,57,114,228,213,183,115,230,209,191,99,198,145,63,126,252,229,215,179,123,246,241,255,227,219,171,75,150,49,98,196,149,55,110,220,165,87,174,65,130,25,50,100,200,141,7,14,28,56,112,224,221,167,83,166,81,162,89,178,121,242,249,239,195,155,43,86,172,69,138,9,18,36,72,144,61,122,244,245,247,243,251,235,203,139,11,22,44,88,176,125,250,233,207,131,27,54,108,216,173,71,142,0]}},{key:"LOG",get:function(){return[255,0,1,25,2,50,26,198,3,223,51,238,27,104,199,75,4,100,224,14,52,141,239,129,28,193,105,248,200,8,76,113,5,138,101,47,225,36,15,33,53,147,142,218,240,18,130,69,29,181,194,125,106,39,249,185,201,154,9,120,77,228,114,166,6,191,139,98,102,221,48,253,226,152,37,179,16,145,34,136,54,208,148,206,143,150,219,189,241,210,19,92,131,56,70,64,30,66,182,163,195,72,126,110,107,58,40,84,250,133,186,61,202,94,155,159,10,21,121,43,78,212,229,172,115,243,167,87,7,112,192,247,140,128,99,13,103,74,222,237,49,197,254,24,227,165,153,119,38,184,180,124,17,68,146,217,35,32,137,46,55,63,209,91,149,188,207,205,144,135,151,178,220,252,190,97,242,86,211,171,20,42,93,158,132,60,57,83,71,109,65,162,31,45,67,216,183,123,164,118,196,23,73,236,127,12,111,246,108,161,59,82,41,157,85,170,251,96,134,177,187,204,62,90,203,89,95,176,156,169,160,81,11,245,22,235,122,117,44,215,79,174,213,233,230,231,173,232,116,214,244,234,168,80,88,175]}}]),t}(),xi=function(){function t(){lt(this,t)}return gt(t,null,[{key:"BLOCK",get:function(){return[3220,1468,2713,1235,3062,1890,2119,1549,2344,2936,1117,2583,1330,2470,1667,2249,2028,3780,481,4011,142,3098,831,3445,592,2517,1776,2234,1951,2827,1070,2660,1345,3177]}}]),t}(),Ni=function(){function t(e){lt(this,t),this._badness=[],this._level=Ai.LEVELS[e.level],this._polynomial=[],this._value=e.value,this._valueLength=this._value.length,this._version=0,this._stringBuffer=[];for(var n=void 0,r=void 0,i=void 0,s=void 0;this._version<40;){this._version++;var o=4*(this._level-1)+16*(this._version-1);if(i=Ai.BLOCKS[o++],s=Ai.BLOCKS[o++],n=Ai.BLOCKS[o++],r=Ai.BLOCKS[o],o=n*(i+s)+s-3+(this._version<=9),this._valueLength<=o)break}this._dataBlock=n,this._eccBlock=r,this._neccBlock1=i,this._neccBlock2=s,this.width=17+4*this._version,this.buffer=t._createArray(this.width*this.width),this._ecc=t._createArray(this._dataBlock+(this._dataBlock+this._eccBlock)*(this._neccBlock1+this._neccBlock2)+this._neccBlock2),this._mask=t._createArray((this.width*(this.width+1)+1)/2),this._insertFinders(),this._insertAlignments(),this.buffer[8+this.width*(this.width-8)]=1,this._insertTimingGap(),this._reverseMask(),this._insertTimingRowAndColumn(),this._insertVersion(),this._syncMask(),this._convertBitStream(this._value.length),this._calculatePolynomial(),this._appendEccToData(),this._interleaveBlocks(),this._pack(),this._finish()}return gt(t,null,[{key:"_createArray",value:function(t){for(var e=[],n=0;n<t;n++)e[n]=0;return e}},{key:"_getMaskBit",value:function(t,e){var n=void 0;return t>e&&(n=t,t=e,e=n),n=e,n+=e*e,n>>=1,n+=t}},{key:"_modN",value:function(t){for(;t>=255;)t-=255,t=(t>>8)+(255&t);return t}},{key:"N1",get:function(){return 3}},{key:"N2",get:function(){return 3}},{key:"N3",get:function(){return 40}},{key:"N4",get:function(){return 10}}]),gt(t,[{key:"_addAlignment",value:function(t,e){this.buffer[t+this.width*e]=1;for(var n=-2;n<2;n++)this.buffer[t+n+this.width*(e-2)]=1,this.buffer[t-2+this.width*(e+n+1)]=1,this.buffer[t+2+this.width*(e+n)]=1,this.buffer[t+n+1+this.width*(e+2)]=1;for(var r=0;r<2;r++)this._setMask(t-1,e+r),this._setMask(t+1,e-r),this._setMask(t-r,e-1),this._setMask(t+r,e+1)}},{key:"_appendData",value:function(e,n,r,i){for(var s=0;s<i;s++)this._stringBuffer[r+s]=0;for(var o=0;o<n;o++){var u=Li.LOG[this._stringBuffer[e+o]^this._stringBuffer[r]];if(255!==u)for(var a=1;a<i;a++)this._stringBuffer[r+a-1]=this._stringBuffer[r+a]^Li.EXPONENT[t._modN(u+this._polynomial[i-a])];else for(var f=r;f<r+i;f++)this._stringBuffer[f]=this._stringBuffer[f+1];this._stringBuffer[r+i-1]=255===u?0:Li.EXPONENT[t._modN(u+this._polynomial[0])]}}},{key:"_appendEccToData",value:function(){for(var t=0,e=this._calculateMaxLength(),n=0;n<this._neccBlock1;n++)this._appendData(t,this._dataBlock,e,this._eccBlock),t+=this._dataBlock,e+=this._eccBlock;for(var r=0;r<this._neccBlock2;r++)this._appendData(t,this._dataBlock+1,e,this._eccBlock),t+=this._dataBlock+1,e+=this._eccBlock}},{key:"_applyMask",value:function(t){var e=this.width;switch(t){case 0:for(var n=0;n<e;n++)for(var r=0;r<e;r++)r+n&1||this._isMasked(r,n)||(this.buffer[r+n*e]^=1);break;case 1:for(var i=0;i<e;i++)for(var s=0;s<e;s++)1&i||this._isMasked(s,i)||(this.buffer[s+i*e]^=1);break;case 2:for(var o=0;o<e;o++)for(var u=0,a=0;a<e;a++,u++)3===u&&(u=0),u||this._isMasked(a,o)||(this.buffer[a+o*e]^=1);break;case 3:for(var f=0,c=0;c<e;c++,f++){3===f&&(f=0);for(var h=f,l=0;l<e;l++,h++)3===h&&(h=0),h||this._isMasked(l,c)||(this.buffer[l+c*e]^=1)}break;case 4:for(var d=0;d<e;d++)for(var _=0,v=d>>1&1,p=0;p<e;p++,_++)3===_&&(_=0,v=!v),v||this._isMasked(p,d)||(this.buffer[p+d*e]^=1);break;case 5:for(var y=0,g=0;g<e;g++,y++){3===y&&(y=0);for(var b=0,k=0;k<e;k++,b++)3===b&&(b=0),(k&g&1)+!(!b|!y)||this._isMasked(k,g)||(this.buffer[k+g*e]^=1)}break;case 6:for(var m=0,w=0;w<e;w++,m++){3===m&&(m=0);for(var O=0,B=0;B<e;B++,O++)3===O&&(O=0),(B&w&1)+(O&&O===m)&1||this._isMasked(B,w)||(this.buffer[B+w*e]^=1)}break;case 7:for(var M=0,S=0;S<e;S++,M++){3===M&&(M=0);for(var E=0,j=0;j<e;j++,E++)3===E&&(E=0),(E&&E===M)+(j+S&1)&1||this._isMasked(j,S)||(this.buffer[j+S*e]^=1)}}}},{key:"_calculateMaxLength",value:function(){return this._dataBlock*(this._neccBlock1+this._neccBlock2)+this._neccBlock2}},{key:"_calculatePolynomial",value:function(){this._polynomial[0]=1;for(var e=0;e<this._eccBlock;e++){this._polynomial[e+1]=1;for(var n=e;n>0;n--)this._polynomial[n]=this._polynomial[n]?this._polynomial[n-1]^Li.EXPONENT[t._modN(Li.LOG[this._polynomial[n]]+e)]:this._polynomial[n-1];this._polynomial[0]=Li.EXPONENT[t._modN(Li.LOG[this._polynomial[0]]+e)]}for(var r=0;r<=this._eccBlock;r++)this._polynomial[r]=Li.LOG[this._polynomial[r]]}},{key:"_checkBadness",value:function(){for(var e=0,n=this.width,r=0;r<n-1;r++)for(var i=0;i<n-1;i++)(this.buffer[i+n*r]&&this.buffer[i+1+n*r]&&this.buffer[i+n*(r+1)]&&this.buffer[i+1+n*(r+1)]||!(this.buffer[i+n*r]||this.buffer[i+1+n*r]||this.buffer[i+n*(r+1)]||this.buffer[i+1+n*(r+1)]))&&(e+=t.N2);for(var s=0,o=0;o<n;o++){var u=0;this._badness[0]=0;for(var a=0,f=0;f<n;f++){var c=this.buffer[f+n*o];a===c?this._badness[u]++:this._badness[++u]=1,a=c,s+=a?1:-1}e+=this._getBadness(u)}s<0&&(s=-s);var h=0,l=s;for(l+=l<<2,l<<=1;l>n*n;)l-=n*n,h++;e+=h*t.N4;for(var d=0;d<n;d++){var _=0;this._badness[0]=0;for(var v=0,p=0;p<n;p++){var y=this.buffer[d+n*p];v===y?this._badness[_]++:this._badness[++_]=1,v=y}e+=this._getBadness(_)}return e}},{key:"_convertBitStream",value:function(t){for(var e=0;e<t;e++)this._ecc[e]=this._value.charCodeAt(e);this._stringBuffer=this._ecc.slice(0);var n=this._calculateMaxLength();t>=n-2&&(t=n-2,this._version>9&&t--);var r=t;if(this._version>9){for(this._stringBuffer[r+2]=0,this._stringBuffer[r+3]=0;r--;){var i=this._stringBuffer[r];this._stringBuffer[r+3]|=255&i<<4,this._stringBuffer[r+2]=i>>4}this._stringBuffer[2]|=255&t<<4,this._stringBuffer[1]=t>>4,this._stringBuffer[0]=64|t>>12}else{for(this._stringBuffer[r+1]=0,this._stringBuffer[r+2]=0;r--;){var s=this._stringBuffer[r];this._stringBuffer[r+2]|=255&s<<4,this._stringBuffer[r+1]=s>>4}this._stringBuffer[1]|=255&t<<4,this._stringBuffer[0]=64|t>>4}for(r=t+3-(this._version<10);r<n;)this._stringBuffer[r++]=236,this._stringBuffer[r++]=17}},{key:"_getBadness",value:function(e){for(var n=0,r=0;r<=e;r++)this._badness[r]>=5&&(n+=t.N1+this._badness[r]-5);for(var i=3;i<e-1;i+=2)this._badness[i-2]===this._badness[i+2]&&this._badness[i+2]===this._badness[i-1]&&this._badness[i-1]===this._badness[i+1]&&3*this._badness[i-1]===this._badness[i]&&(0===this._badness[i-3]||i+3>e||3*this._badness[i-3]>=4*this._badness[i]||3*this._badness[i+3]>=4*this._badness[i])&&(n+=t.N3);return n}},{key:"_finish",value:function(){this._stringBuffer=this.buffer.slice(0);var t=0,e=void 0,n=3e4;for(e=0;e<8;e++){this._applyMask(e);var r=this._checkBadness();if(r<n&&(n=r,t=e),7===t)break;this.buffer=this._stringBuffer.slice(0)}for(t!==e&&this._applyMask(t),n=Ai.FINAL_FORMAT[t+(this._level-1<<3)],
+	e=0;e<8;e++,n>>=1)1&n&&(this.buffer[this.width-1-e+8*this.width]=1,e<6?this.buffer[8+this.width*e]=1:this.buffer[8+this.width*(e+1)]=1);for(e=0;e<7;e++,n>>=1)1&n&&(this.buffer[8+this.width*(this.width-7+e)]=1,e?this.buffer[6-e+8*this.width]=1:this.buffer[7+8*this.width]=1)}},{key:"_interleaveBlocks",value:function(){var t=this._calculateMaxLength(),e=void 0,n=0;for(e=0;e<this._dataBlock;e++){for(var r=0;r<this._neccBlock1;r++)this._ecc[n++]=this._stringBuffer[e+r*this._dataBlock];for(var i=0;i<this._neccBlock2;i++)this._ecc[n++]=this._stringBuffer[this._neccBlock1*this._dataBlock+e+i*(this._dataBlock+1)]}for(var s=0;s<this._neccBlock2;s++)this._ecc[n++]=this._stringBuffer[this._neccBlock1*this._dataBlock+e+s*(this._dataBlock+1)];for(e=0;e<this._eccBlock;e++)for(var o=0;o<this._neccBlock1+this._neccBlock2;o++)this._ecc[n++]=this._stringBuffer[t+e+o*this._eccBlock];this._stringBuffer=this._ecc}},{key:"_insertAlignments",value:function(){var t=this.width;if(this._version>1)for(var e=ji.BLOCK[this._version],n=t-7;;){for(var r=t-7;r>e-3&&(this._addAlignment(r,n),!(r<e));)r-=e;if(n<=e+9)break;n-=e,this._addAlignment(6,n),this._addAlignment(n,6)}}},{key:"_insertFinders",value:function(){for(var t=this.width,e=0;e<3;e++){var n=0,r=0;1===e&&(n=t-7),2===e&&(r=t-7),this.buffer[r+3+t*(n+3)]=1;for(var i=0;i<6;i++)this.buffer[r+i+t*n]=1,this.buffer[r+t*(n+i+1)]=1,this.buffer[r+6+t*(n+i)]=1,this.buffer[r+i+1+t*(n+6)]=1;for(var s=1;s<5;s++)this._setMask(r+s,n+1),this._setMask(r+1,n+s+1),this._setMask(r+5,n+s),this._setMask(r+s+1,n+5);for(var o=2;o<4;o++)this.buffer[r+o+t*(n+2)]=1,this.buffer[r+2+t*(n+o+1)]=1,this.buffer[r+4+t*(n+o)]=1,this.buffer[r+o+1+t*(n+4)]=1}}},{key:"_insertTimingGap",value:function(){for(var t=this.width,e=0;e<7;e++)this._setMask(7,e),this._setMask(t-8,e),this._setMask(7,e+t-7);for(var n=0;n<8;n++)this._setMask(n,7),this._setMask(n+t-8,7),this._setMask(n,t-8)}},{key:"_insertTimingRowAndColumn",value:function(){for(var t=this.width,e=0;e<t-14;e++)1&e?(this._setMask(8+e,6),this._setMask(6,8+e)):(this.buffer[8+e+6*t]=1,this.buffer[6+t*(8+e)]=1)}},{key:"_insertVersion",value:function(){var t=this.width;if(this._version>6)for(var e=xi.BLOCK[this._version-7],n=17,r=0;r<6;r++)for(var i=0;i<3;i++,n--)1&(n>11?this._version>>n-12:e>>n)?(this.buffer[5-r+t*(2-i+t-11)]=1,this.buffer[2-i+t-11+t*(5-r)]=1):(this._setMask(5-r,2-i+t-11),this._setMask(2-i+t-11,5-r))}},{key:"_isMasked",value:function(e,n){var r=t._getMaskBit(e,n);return 1===this._mask[r]}},{key:"_pack",value:function(){for(var t=this.width-1,e=this.width-1,n=1,r=1,i=(this._dataBlock+this._eccBlock)*(this._neccBlock1+this._neccBlock2)+this._neccBlock2,s=0;s<i;s++)for(var o=this._stringBuffer[s],u=0;u<8;u++,o<<=1){128&o&&(this.buffer[t+this.width*e]=1);do r?t--:(t++,n?0!==e?e--:(t-=2,n=!n,6===t&&(t--,e=9)):e!==this.width-1?e++:(t-=2,n=!n,6===t&&(t--,e-=8))),r=!r;while(this._isMasked(t,e))}}},{key:"_reverseMask",value:function(){for(var t=this.width,e=0;e<9;e++)this._setMask(e,8);for(var n=0;n<8;n++)this._setMask(n+t-8,8),this._setMask(8,n);for(var r=0;r<7;r++)this._setMask(8,r+t-7)}},{key:"_setMask",value:function(e,n){var r=t._getMaskBit(e,n);this._mask[r]=1}},{key:"_syncMask",value:function(){for(var t=this.width,e=0;e<t;e++)for(var n=0;n<=e;n++)this.buffer[n+t*e]&&this._setMask(n,e)}}]),t}(),Pi=function(t){function e(){return lt(this,e),Jr(this,(e.__proto__||ct(e)).apply(this,arguments))}return ci(e,t),gt(e,[{key:"draw",value:function(){var t=this.qrious;t.image.src=t.toDataURL()}},{key:"reset",value:function(){var t=this.qrious;t.image.src=""}},{key:"resize",value:function(){var t=this.qrious,e=t.image;e.width=t.size,e.height=t.size}}]),e}(Si),Ti=function(){function t(){lt(this,t),this._services={}}return gt(t,[{key:"getService",value:function(t){var e=this._services[t];if(!e)throw new Error("Service is not being managed with name: "+t);return e}},{key:"setService",value:function(t,e){if(this._services[t])throw new Error("Service is already managed with name: "+t);e&&(this._services[t]=e)}}]),t}(),Fi=function(){function t(e){lt(this,t),e=t._parseOptions(e),hi.privatize(this,e);var n=this._element,r=t._serviceManager.getService("element");this.canvas=n&&r.isCanvas(n)?n:r.createCanvas(),this.canvas.qrious=this,this.image=n&&r.isImage(n)?n:r.createImage(),this.image.qrious=this,this._renderers=[new Ei(this),new Pi(this)],this.update()}return gt(t,null,[{key:"use",value:function(e){t._serviceManager.setService(e.getName(),e)}},{key:"_parseOptions",value:function(e){return e=Mi({},t.DEFAULTS,e),e.backgroundAlpha=hi.abs(e.backgroundAlpha),e.foregroundAlpha=hi.abs(e.foregroundAlpha),e.level=hi.toUpperCase(e.level),e.padding=hi.abs(e.padding),e.size=hi.abs(e.size),e}},{key:"DEFAULTS",get:function(){return{background:"white",backgroundAlpha:1,foreground:"black",foregroundAlpha:1,level:"L",mime:"image/png",padding:null,size:100,value:""}}},{key:"VERSION",get:function(){return"2.2.0"}}]),gt(t,[{key:"toDataURL",value:function(t){return this.canvas.toDataURL(t||this.mime)}},{key:"update",value:function(){var t=new Ni({level:this.level,value:this.value});this._renderers.forEach(function(e){return e.render(t)})}},{key:"background",get:function(){return this._background},set:function(e){var n=hi.setter(this,"_background",e,t.DEFAULTS.background);n&&this.update()}},{key:"backgroundAlpha",get:function(){return this._backgroundAlpha},set:function(e){var n=hi.setter(this,"_backgroundAlpha",e,t.DEFAULTS.backgroundAlpha);n&&this.update()}},{key:"foreground",get:function(){return this._foreground},set:function(e){var n=hi.setter(this,"_foreground",e,t.DEFAULTS.foreground);n&&this.update()}},{key:"foregroundAlpha",get:function(){return this._foregroundAlpha},set:function(e){var n=hi.setter(this,"_foregroundAlpha",e,t.DEFAULTS.foregroundAlpha);n&&this.update()}},{key:"level",get:function(){return this._level},set:function(e){var n=hi.setter(this,"_level",e,t.DEFAULTS.level,hi.toUpperCase);n&&this.update()}},{key:"mime",get:function(){return this._mime},set:function(e){var n=hi.setter(this,"_mime",e,t.DEFAULTS.mime);n&&this.update()}},{key:"padding",get:function(){return this._padding},set:function(e){var n=hi.setter(this,"_padding",e,t.DEFAULTS.padding,hi.abs);n&&this.update()}},{key:"size",get:function(){return this._size},set:function(e){var n=hi.setter(this,"_size",e,t.DEFAULTS.size,hi.abs);n&&this.update()}},{key:"value",get:function(){return this._value},set:function(e){var n=hi.setter(this,"_value",e,t.DEFAULTS.value);n&&this.update()}}]),t}();return Fi._serviceManager=new Ti,Fi.use(new _i),Fi})},function(t,e,n){var r=n(4)(n(1),n(5),null,null);t.exports=r.exports},function(t,e){t.exports=function(t,e,n,r){var i,s=t=t||{},o=typeof t.default;"object"!==o&&"function"!==o||(i=t,s=t.default);var u="function"==typeof s?s.options:s;if(e&&(u.render=e.render,u.staticRenderFns=e.staticRenderFns),n&&(u._scopeId=n),r){var a=u.computed||(u.computed={});Object.keys(r).forEach(function(t){var e=r[t];a[t]=function(){return e}})}return{esModule:i,exports:s,options:u}}},function(t,e){t.exports={render:function(){var t=this,e=t.$createElement,n=t._self._c||e;return n("div",{class:t.cls})},staticRenderFns:[]}}])});
 
 /***/ },
 /* 7 */
-/***/ function(module, exports, __webpack_require__) {
-
-	/*
-	 * QRious v2.2.0
-	 * Copyright (C) 2016 Alasdair Mercer
-	 * Copyright (C) 2010 Tom Zerucha
-	 *
-	 * This program is free software: you can redistribute it and/or modify
-	 * it under the terms of the GNU General Public License as published by
-	 * the Free Software Foundation, either version 3 of the License, or
-	 * (at your option) any later version.
-	 *
-	 * This program is distributed in the hope that it will be useful,
-	 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-	 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	 * GNU General Public License for more details.
-	 *
-	 * You should have received a copy of the GNU General Public License
-	 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-	 */
-	(function (global, factory) {
-		 true ? module.exports = factory() :
-		typeof define === 'function' && define.amd ? define('qrious', factory) :
-		(global.QRious = factory());
-	}(this, (function () { 'use strict';
-
-		function unwrapExports (x) {
-			return x && x.__esModule ? x['default'] : x;
-		}
-
-		function createCommonjsModule(fn, module) {
-			return module = { exports: {} }, fn(module, module.exports), module.exports;
-		}
-
-		// 7.2.1 RequireObjectCoercible(argument)
-		var _defined = function(it){
-		  if(it == undefined)throw TypeError("Can't call method on  " + it);
-		  return it;
-		};
-
-		// 7.1.13 ToObject(argument)
-		var defined = _defined;
-		var _toObject = function(it){
-		  return Object(defined(it));
-		};
-
-		var hasOwnProperty = {}.hasOwnProperty;
-		var _has = function(it, key){
-		  return hasOwnProperty.call(it, key);
-		};
-
-		var _global = createCommonjsModule(function (module) {
-		// https://github.com/zloirock/core-js/issues/86#issuecomment-115759028
-		var global = module.exports = typeof window != 'undefined' && window.Math == Math
-		  ? window : typeof self != 'undefined' && self.Math == Math ? self : Function('return this')();
-		if(typeof __g == 'number')__g = global; // eslint-disable-line no-undef
-		});
-
-		var global$1 = _global;
-		var SHARED = '__core-js_shared__';
-		var store  = global$1[SHARED] || (global$1[SHARED] = {});
-		var _shared = function(key){
-		  return store[key] || (store[key] = {});
-		};
-
-		var id = 0;
-		var px = Math.random();
-		var _uid = function(key){
-		  return 'Symbol('.concat(key === undefined ? '' : key, ')_', (++id + px).toString(36));
-		};
-
-		var shared = _shared('keys');
-		var uid    = _uid;
-		var _sharedKey = function(key){
-		  return shared[key] || (shared[key] = uid(key));
-		};
-
-		// 19.1.2.9 / 15.2.3.2 Object.getPrototypeOf(O)
-		var has         = _has;
-		var toObject$1    = _toObject;
-		var IE_PROTO    = _sharedKey('IE_PROTO');
-		var ObjectProto = Object.prototype;
-
-		var _objectGpo = Object.getPrototypeOf || function(O){
-		  O = toObject$1(O);
-		  if(has(O, IE_PROTO))return O[IE_PROTO];
-		  if(typeof O.constructor == 'function' && O instanceof O.constructor){
-		    return O.constructor.prototype;
-		  } return O instanceof Object ? ObjectProto : null;
-		};
-
-		var _core = createCommonjsModule(function (module) {
-		var core = module.exports = {version: '2.4.0'};
-		if(typeof __e == 'number')__e = core; // eslint-disable-line no-undef
-		});
-
-		var _aFunction = function(it){
-		  if(typeof it != 'function')throw TypeError(it + ' is not a function!');
-		  return it;
-		};
-
-		// optional / simple context binding
-		var aFunction = _aFunction;
-		var _ctx = function(fn, that, length){
-		  aFunction(fn);
-		  if(that === undefined)return fn;
-		  switch(length){
-		    case 1: return function(a){
-		      return fn.call(that, a);
-		    };
-		    case 2: return function(a, b){
-		      return fn.call(that, a, b);
-		    };
-		    case 3: return function(a, b, c){
-		      return fn.call(that, a, b, c);
-		    };
-		  }
-		  return function(/* ...args */){
-		    return fn.apply(that, arguments);
-		  };
-		};
-
-		var _isObject = function(it){
-		  return typeof it === 'object' ? it !== null : typeof it === 'function';
-		};
-
-		var isObject = _isObject;
-		var _anObject = function(it){
-		  if(!isObject(it))throw TypeError(it + ' is not an object!');
-		  return it;
-		};
-
-		var _fails = function(exec){
-		  try {
-		    return !!exec();
-		  } catch(e){
-		    return true;
-		  }
-		};
-
-		// Thank's IE8 for his funny defineProperty
-		var _descriptors = !_fails(function(){
-		  return Object.defineProperty({}, 'a', {get: function(){ return 7; }}).a != 7;
-		});
-
-		var isObject$1 = _isObject;
-		var document$1 = _global.document;
-		var is = isObject$1(document$1) && isObject$1(document$1.createElement);
-		var _domCreate = function(it){
-		  return is ? document$1.createElement(it) : {};
-		};
-
-		var _ie8DomDefine = !_descriptors && !_fails(function(){
-		  return Object.defineProperty(_domCreate('div'), 'a', {get: function(){ return 7; }}).a != 7;
-		});
-
-		// 7.1.1 ToPrimitive(input [, PreferredType])
-		var isObject$2 = _isObject;
-		// instead of the ES6 spec version, we didn't implement @@toPrimitive case
-		// and the second argument - flag - preferred type is a string
-		var _toPrimitive = function(it, S){
-		  if(!isObject$2(it))return it;
-		  var fn, val;
-		  if(S && typeof (fn = it.toString) == 'function' && !isObject$2(val = fn.call(it)))return val;
-		  if(typeof (fn = it.valueOf) == 'function' && !isObject$2(val = fn.call(it)))return val;
-		  if(!S && typeof (fn = it.toString) == 'function' && !isObject$2(val = fn.call(it)))return val;
-		  throw TypeError("Can't convert object to primitive value");
-		};
-
-		var anObject       = _anObject;
-		var IE8_DOM_DEFINE = _ie8DomDefine;
-		var toPrimitive    = _toPrimitive;
-		var dP$1             = Object.defineProperty;
-
-		var f = _descriptors ? Object.defineProperty : function defineProperty(O, P, Attributes){
-		  anObject(O);
-		  P = toPrimitive(P, true);
-		  anObject(Attributes);
-		  if(IE8_DOM_DEFINE)try {
-		    return dP$1(O, P, Attributes);
-		  } catch(e){ /* empty */ }
-		  if('get' in Attributes || 'set' in Attributes)throw TypeError('Accessors not supported!');
-		  if('value' in Attributes)O[P] = Attributes.value;
-		  return O;
-		};
-
-		var _objectDp = {
-			f: f
-		};
-
-		var _propertyDesc = function(bitmap, value){
-		  return {
-		    enumerable  : !(bitmap & 1),
-		    configurable: !(bitmap & 2),
-		    writable    : !(bitmap & 4),
-		    value       : value
-		  };
-		};
-
-		var dP         = _objectDp;
-		var createDesc = _propertyDesc;
-		var _hide = _descriptors ? function(object, key, value){
-		  return dP.f(object, key, createDesc(1, value));
-		} : function(object, key, value){
-		  object[key] = value;
-		  return object;
-		};
-
-		var global$2    = _global;
-		var core$1      = _core;
-		var ctx       = _ctx;
-		var hide      = _hide;
-		var PROTOTYPE = 'prototype';
-
-		var $export$1 = function(type, name, source){
-		  var IS_FORCED = type & $export$1.F
-		    , IS_GLOBAL = type & $export$1.G
-		    , IS_STATIC = type & $export$1.S
-		    , IS_PROTO  = type & $export$1.P
-		    , IS_BIND   = type & $export$1.B
-		    , IS_WRAP   = type & $export$1.W
-		    , exports   = IS_GLOBAL ? core$1 : core$1[name] || (core$1[name] = {})
-		    , expProto  = exports[PROTOTYPE]
-		    , target    = IS_GLOBAL ? global$2 : IS_STATIC ? global$2[name] : (global$2[name] || {})[PROTOTYPE]
-		    , key, own, out;
-		  if(IS_GLOBAL)source = name;
-		  for(key in source){
-		    // contains in native
-		    own = !IS_FORCED && target && target[key] !== undefined;
-		    if(own && key in exports)continue;
-		    // export native or passed
-		    out = own ? target[key] : source[key];
-		    // prevent global pollution for namespaces
-		    exports[key] = IS_GLOBAL && typeof target[key] != 'function' ? source[key]
-		    // bind timers to global for call from export context
-		    : IS_BIND && own ? ctx(out, global$2)
-		    // wrap global constructors for prevent change them in library
-		    : IS_WRAP && target[key] == out ? (function(C){
-		      var F = function(a, b, c){
-		        if(this instanceof C){
-		          switch(arguments.length){
-		            case 0: return new C;
-		            case 1: return new C(a);
-		            case 2: return new C(a, b);
-		          } return new C(a, b, c);
-		        } return C.apply(this, arguments);
-		      };
-		      F[PROTOTYPE] = C[PROTOTYPE];
-		      return F;
-		    // make static versions for prototype methods
-		    })(out) : IS_PROTO && typeof out == 'function' ? ctx(Function.call, out) : out;
-		    // export proto methods to core.%CONSTRUCTOR%.methods.%NAME%
-		    if(IS_PROTO){
-		      (exports.virtual || (exports.virtual = {}))[key] = out;
-		      // export proto methods to core.%CONSTRUCTOR%.prototype.%NAME%
-		      if(type & $export$1.R && expProto && !expProto[key])hide(expProto, key, out);
-		    }
-		  }
-		};
-		// type bitmap
-		$export$1.F = 1;   // forced
-		$export$1.G = 2;   // global
-		$export$1.S = 4;   // static
-		$export$1.P = 8;   // proto
-		$export$1.B = 16;  // bind
-		$export$1.W = 32;  // wrap
-		$export$1.U = 64;  // safe
-		$export$1.R = 128; // real proto method for `library` 
-		var _export = $export$1;
-
-		// most Object methods by ES6 should accept primitives
-		var $export = _export;
-		var core    = _core;
-		var fails   = _fails;
-		var _objectSap = function(KEY, exec){
-		  var fn  = (core.Object || {})[KEY] || Object[KEY]
-		    , exp = {};
-		  exp[KEY] = exec(fn);
-		  $export($export.S + $export.F * fails(function(){ fn(1); }), 'Object', exp);
-		};
-
-		// 19.1.2.9 Object.getPrototypeOf(O)
-		var toObject        = _toObject;
-		var $getPrototypeOf = _objectGpo;
-
-		_objectSap('getPrototypeOf', function(){
-		  return function getPrototypeOf(it){
-		    return $getPrototypeOf(toObject(it));
-		  };
-		});
-
-		var getPrototypeOf$2 = _core.Object.getPrototypeOf;
-
-		var getPrototypeOf$1 = createCommonjsModule(function (module) {
-		module.exports = { "default": getPrototypeOf$2, __esModule: true };
-		});
-
-		var _Object$getPrototypeOf = unwrapExports(getPrototypeOf$1);
-
-		var classCallCheck = createCommonjsModule(function (module, exports) {
-		"use strict";
-
-		exports.__esModule = true;
-
-		exports.default = function (instance, Constructor) {
-		  if (!(instance instanceof Constructor)) {
-		    throw new TypeError("Cannot call a class as a function");
-		  }
-		};
-		});
-
-		var _classCallCheck = unwrapExports(classCallCheck);
-
-		var $export$2 = _export;
-		// 19.1.2.4 / 15.2.3.6 Object.defineProperty(O, P, Attributes)
-		$export$2($export$2.S + $export$2.F * !_descriptors, 'Object', {defineProperty: _objectDp.f});
-
-		var $Object = _core.Object;
-		var defineProperty$3 = function defineProperty$3(it, key, desc){
-		  return $Object.defineProperty(it, key, desc);
-		};
-
-		var defineProperty$1 = createCommonjsModule(function (module) {
-		module.exports = { "default": defineProperty$3, __esModule: true };
-		});
-
-		var createClass = createCommonjsModule(function (module, exports) {
-		"use strict";
-
-		exports.__esModule = true;
-
-		var _defineProperty = defineProperty$1;
-
-		var _defineProperty2 = _interopRequireDefault(_defineProperty);
-
-		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-		exports.default = function () {
-		  function defineProperties(target, props) {
-		    for (var i = 0; i < props.length; i++) {
-		      var descriptor = props[i];
-		      descriptor.enumerable = descriptor.enumerable || false;
-		      descriptor.configurable = true;
-		      if ("value" in descriptor) descriptor.writable = true;
-		      (0, _defineProperty2.default)(target, descriptor.key, descriptor);
-		    }
-		  }
-
-		  return function (Constructor, protoProps, staticProps) {
-		    if (protoProps) defineProperties(Constructor.prototype, protoProps);
-		    if (staticProps) defineProperties(Constructor, staticProps);
-		    return Constructor;
-		  };
-		}();
-		});
-
-		var _createClass = unwrapExports(createClass);
-
-		// 7.1.4 ToInteger
-		var ceil  = Math.ceil;
-		var floor = Math.floor;
-		var _toInteger = function(it){
-		  return isNaN(it = +it) ? 0 : (it > 0 ? floor : ceil)(it);
-		};
-
-		var toInteger = _toInteger;
-		var defined$1   = _defined;
-		// true  -> String#at
-		// false -> String#codePointAt
-		var _stringAt = function(TO_STRING){
-		  return function(that, pos){
-		    var s = String(defined$1(that))
-		      , i = toInteger(pos)
-		      , l = s.length
-		      , a, b;
-		    if(i < 0 || i >= l)return TO_STRING ? '' : undefined;
-		    a = s.charCodeAt(i);
-		    return a < 0xd800 || a > 0xdbff || i + 1 === l || (b = s.charCodeAt(i + 1)) < 0xdc00 || b > 0xdfff
-		      ? TO_STRING ? s.charAt(i) : a
-		      : TO_STRING ? s.slice(i, i + 2) : (a - 0xd800 << 10) + (b - 0xdc00) + 0x10000;
-		  };
-		};
-
-		var _library = true;
-
-		var _redefine = _hide;
-
-		var _iterators = {};
-
-		var toString$1 = {}.toString;
-
-		var _cof = function(it){
-		  return toString$1.call(it).slice(8, -1);
-		};
-
-		// fallback for non-array-like ES3 and non-enumerable old V8 strings
-		var cof = _cof;
-		var _iobject = Object('z').propertyIsEnumerable(0) ? Object : function(it){
-		  return cof(it) == 'String' ? it.split('') : Object(it);
-		};
-
-		// to indexed object, toObject with fallback for non-array-like ES3 strings
-		var IObject = _iobject;
-		var defined$2 = _defined;
-		var _toIobject = function(it){
-		  return IObject(defined$2(it));
-		};
-
-		// 7.1.15 ToLength
-		var toInteger$1 = _toInteger;
-		var min       = Math.min;
-		var _toLength = function(it){
-		  return it > 0 ? min(toInteger$1(it), 0x1fffffffffffff) : 0; // pow(2, 53) - 1 == 9007199254740991
-		};
-
-		var toInteger$2 = _toInteger;
-		var max       = Math.max;
-		var min$1       = Math.min;
-		var _toIndex = function(index, length){
-		  index = toInteger$2(index);
-		  return index < 0 ? max(index + length, 0) : min$1(index, length);
-		};
-
-		// false -> Array#indexOf
-		// true  -> Array#includes
-		var toIObject$1 = _toIobject;
-		var toLength  = _toLength;
-		var toIndex   = _toIndex;
-		var _arrayIncludes = function(IS_INCLUDES){
-		  return function($this, el, fromIndex){
-		    var O      = toIObject$1($this)
-		      , length = toLength(O.length)
-		      , index  = toIndex(fromIndex, length)
-		      , value;
-		    // Array#includes uses SameValueZero equality algorithm
-		    if(IS_INCLUDES && el != el)while(length > index){
-		      value = O[index++];
-		      if(value != value)return true;
-		    // Array#toIndex ignores holes, Array#includes - not
-		    } else for(;length > index; index++)if(IS_INCLUDES || index in O){
-		      if(O[index] === el)return IS_INCLUDES || index || 0;
-		    } return !IS_INCLUDES && -1;
-		  };
-		};
-
-		var has$2          = _has;
-		var toIObject    = _toIobject;
-		var arrayIndexOf = _arrayIncludes(false);
-		var IE_PROTO$2     = _sharedKey('IE_PROTO');
-
-		var _objectKeysInternal = function(object, names){
-		  var O      = toIObject(object)
-		    , i      = 0
-		    , result = []
-		    , key;
-		  for(key in O)if(key != IE_PROTO$2)has$2(O, key) && result.push(key);
-		  // Don't enum bug & hidden keys
-		  while(names.length > i)if(has$2(O, key = names[i++])){
-		    ~arrayIndexOf(result, key) || result.push(key);
-		  }
-		  return result;
-		};
-
-		// IE 8- don't enum bug keys
-		var _enumBugKeys = (
-		  'constructor,hasOwnProperty,isPrototypeOf,propertyIsEnumerable,toLocaleString,toString,valueOf'
-		).split(',');
-
-		// 19.1.2.14 / 15.2.3.14 Object.keys(O)
-		var $keys       = _objectKeysInternal;
-		var enumBugKeys$1 = _enumBugKeys;
-
-		var _objectKeys = Object.keys || function keys(O){
-		  return $keys(O, enumBugKeys$1);
-		};
-
-		var dP$2       = _objectDp;
-		var anObject$2 = _anObject;
-		var getKeys  = _objectKeys;
-
-		var _objectDps = _descriptors ? Object.defineProperties : function defineProperties(O, Properties){
-		  anObject$2(O);
-		  var keys   = getKeys(Properties)
-		    , length = keys.length
-		    , i = 0
-		    , P;
-		  while(length > i)dP$2.f(O, P = keys[i++], Properties[P]);
-		  return O;
-		};
-
-		var _html = _global.document && document.documentElement;
-
-		// 19.1.2.2 / 15.2.3.5 Object.create(O [, Properties])
-		var anObject$1    = _anObject;
-		var dPs         = _objectDps;
-		var enumBugKeys = _enumBugKeys;
-		var IE_PROTO$1    = _sharedKey('IE_PROTO');
-		var Empty       = function(){ /* empty */ };
-		var PROTOTYPE$1   = 'prototype';
-
-		// Create object with fake `null` prototype: use iframe Object with cleared prototype
-		var createDict = function(){
-		  // Thrash, waste and sodomy: IE GC bug
-		  var iframe = _domCreate('iframe')
-		    , i      = enumBugKeys.length
-		    , lt     = '<'
-		    , gt     = '>'
-		    , iframeDocument;
-		  iframe.style.display = 'none';
-		  _html.appendChild(iframe);
-		  iframe.src = 'javascript:'; // eslint-disable-line no-script-url
-		  // createDict = iframe.contentWindow.Object;
-		  // html.removeChild(iframe);
-		  iframeDocument = iframe.contentWindow.document;
-		  iframeDocument.open();
-		  iframeDocument.write(lt + 'script' + gt + 'document.F=Object' + lt + '/script' + gt);
-		  iframeDocument.close();
-		  createDict = iframeDocument.F;
-		  while(i--)delete createDict[PROTOTYPE$1][enumBugKeys[i]];
-		  return createDict();
-		};
-
-		var _objectCreate = Object.create || function create(O, Properties){
-		  var result;
-		  if(O !== null){
-		    Empty[PROTOTYPE$1] = anObject$1(O);
-		    result = new Empty;
-		    Empty[PROTOTYPE$1] = null;
-		    // add "__proto__" for Object.getPrototypeOf polyfill
-		    result[IE_PROTO$1] = O;
-		  } else result = createDict();
-		  return Properties === undefined ? result : dPs(result, Properties);
-		};
-
-		var _wks = createCommonjsModule(function (module) {
-		var store      = _shared('wks')
-		  , uid        = _uid
-		  , Symbol     = _global.Symbol
-		  , USE_SYMBOL = typeof Symbol == 'function';
-
-		var $exports = module.exports = function(name){
-		  return store[name] || (store[name] =
-		    USE_SYMBOL && Symbol[name] || (USE_SYMBOL ? Symbol : uid)('Symbol.' + name));
-		};
-
-		$exports.store = store;
-		});
-
-		var def = _objectDp.f;
-		var has$3 = _has;
-		var TAG = _wks('toStringTag');
-
-		var _setToStringTag = function(it, tag, stat){
-		  if(it && !has$3(it = stat ? it : it.prototype, TAG))def(it, TAG, {configurable: true, value: tag});
-		};
-
-		var create$1         = _objectCreate;
-		var descriptor     = _propertyDesc;
-		var setToStringTag$1 = _setToStringTag;
-		var IteratorPrototype = {};
-
-		// 25.1.2.1.1 %IteratorPrototype%[@@iterator]()
-		_hide(IteratorPrototype, _wks('iterator'), function(){ return this; });
-
-		var _iterCreate = function(Constructor, NAME, next){
-		  Constructor.prototype = create$1(IteratorPrototype, {next: descriptor(1, next)});
-		  setToStringTag$1(Constructor, NAME + ' Iterator');
-		};
-
-		var LIBRARY        = _library;
-		var $export$3        = _export;
-		var redefine       = _redefine;
-		var hide$1           = _hide;
-		var has$1            = _has;
-		var Iterators      = _iterators;
-		var $iterCreate    = _iterCreate;
-		var setToStringTag = _setToStringTag;
-		var getPrototypeOf$4 = _objectGpo;
-		var ITERATOR       = _wks('iterator');
-		var BUGGY          = !([].keys && 'next' in [].keys());
-		var FF_ITERATOR    = '@@iterator';
-		var KEYS           = 'keys';
-		var VALUES         = 'values';
-
-		var returnThis = function(){ return this; };
-
-		var _iterDefine = function(Base, NAME, Constructor, next, DEFAULT, IS_SET, FORCED){
-		  $iterCreate(Constructor, NAME, next);
-		  var getMethod = function(kind){
-		    if(!BUGGY && kind in proto)return proto[kind];
-		    switch(kind){
-		      case KEYS: return function keys(){ return new Constructor(this, kind); };
-		      case VALUES: return function values(){ return new Constructor(this, kind); };
-		    } return function entries(){ return new Constructor(this, kind); };
-		  };
-		  var TAG        = NAME + ' Iterator'
-		    , DEF_VALUES = DEFAULT == VALUES
-		    , VALUES_BUG = false
-		    , proto      = Base.prototype
-		    , $native    = proto[ITERATOR] || proto[FF_ITERATOR] || DEFAULT && proto[DEFAULT]
-		    , $default   = $native || getMethod(DEFAULT)
-		    , $entries   = DEFAULT ? !DEF_VALUES ? $default : getMethod('entries') : undefined
-		    , $anyNative = NAME == 'Array' ? proto.entries || $native : $native
-		    , methods, key, IteratorPrototype;
-		  // Fix native
-		  if($anyNative){
-		    IteratorPrototype = getPrototypeOf$4($anyNative.call(new Base));
-		    if(IteratorPrototype !== Object.prototype){
-		      // Set @@toStringTag to native iterators
-		      setToStringTag(IteratorPrototype, TAG, true);
-		      // fix for some old engines
-		      if(!LIBRARY && !has$1(IteratorPrototype, ITERATOR))hide$1(IteratorPrototype, ITERATOR, returnThis);
-		    }
-		  }
-		  // fix Array#{values, @@iterator}.name in V8 / FF
-		  if(DEF_VALUES && $native && $native.name !== VALUES){
-		    VALUES_BUG = true;
-		    $default = function values(){ return $native.call(this); };
-		  }
-		  // Define iterator
-		  if((!LIBRARY || FORCED) && (BUGGY || VALUES_BUG || !proto[ITERATOR])){
-		    hide$1(proto, ITERATOR, $default);
-		  }
-		  // Plug for library
-		  Iterators[NAME] = $default;
-		  Iterators[TAG]  = returnThis;
-		  if(DEFAULT){
-		    methods = {
-		      values:  DEF_VALUES ? $default : getMethod(VALUES),
-		      keys:    IS_SET     ? $default : getMethod(KEYS),
-		      entries: $entries
-		    };
-		    if(FORCED)for(key in methods){
-		      if(!(key in proto))redefine(proto, key, methods[key]);
-		    } else $export$3($export$3.P + $export$3.F * (BUGGY || VALUES_BUG), NAME, methods);
-		  }
-		  return methods;
-		};
-
-		var $at  = _stringAt(true);
-
-		// 21.1.3.27 String.prototype[@@iterator]()
-		_iterDefine(String, 'String', function(iterated){
-		  this._t = String(iterated); // target
-		  this._i = 0;                // next index
-		// 21.1.5.2.1 %StringIteratorPrototype%.next()
-		}, function(){
-		  var O     = this._t
-		    , index = this._i
-		    , point;
-		  if(index >= O.length)return {value: undefined, done: true};
-		  point = $at(O, index);
-		  this._i += point.length;
-		  return {value: point, done: false};
-		});
-
-		var _addToUnscopables = function(){ /* empty */ };
-
-		var _iterStep = function(done, value){
-		  return {value: value, done: !!done};
-		};
-
-		var addToUnscopables = _addToUnscopables;
-		var step             = _iterStep;
-		var Iterators$2        = _iterators;
-		var toIObject$2        = _toIobject;
-
-		// 22.1.3.4 Array.prototype.entries()
-		// 22.1.3.13 Array.prototype.keys()
-		// 22.1.3.29 Array.prototype.values()
-		// 22.1.3.30 Array.prototype[@@iterator]()
-		var es6_array_iterator = _iterDefine(Array, 'Array', function(iterated, kind){
-		  this._t = toIObject$2(iterated); // target
-		  this._i = 0;                   // next index
-		  this._k = kind;                // kind
-		// 22.1.5.2.1 %ArrayIteratorPrototype%.next()
-		}, function(){
-		  var O     = this._t
-		    , kind  = this._k
-		    , index = this._i++;
-		  if(!O || index >= O.length){
-		    this._t = undefined;
-		    return step(1);
-		  }
-		  if(kind == 'keys'  )return step(0, index);
-		  if(kind == 'values')return step(0, O[index]);
-		  return step(0, [index, O[index]]);
-		}, 'values');
-
-		// argumentsList[@@iterator] is %ArrayProto_values% (9.4.4.6, 9.4.4.7)
-		Iterators$2.Arguments = Iterators$2.Array;
-
-		addToUnscopables('keys');
-		addToUnscopables('values');
-		addToUnscopables('entries');
-
-		var global$3        = _global;
-		var hide$2          = _hide;
-		var Iterators$1     = _iterators;
-		var TO_STRING_TAG = _wks('toStringTag');
-
-		for(var collections = ['NodeList', 'DOMTokenList', 'MediaList', 'StyleSheetList', 'CSSRuleList'], i = 0; i < 5; i++){
-		  var NAME       = collections[i]
-		    , Collection = global$3[NAME]
-		    , proto      = Collection && Collection.prototype;
-		  if(proto && !proto[TO_STRING_TAG])hide$2(proto, TO_STRING_TAG, NAME);
-		  Iterators$1[NAME] = Iterators$1.Array;
-		}
-
-		var f$1 = _wks;
-
-		var _wksExt = {
-			f: f$1
-		};
-
-		var iterator$2 = _wksExt.f('iterator');
-
-		var iterator = createCommonjsModule(function (module) {
-		module.exports = { "default": iterator$2, __esModule: true };
-		});
-
-		var _meta = createCommonjsModule(function (module) {
-		var META     = _uid('meta')
-		  , isObject = _isObject
-		  , has      = _has
-		  , setDesc  = _objectDp.f
-		  , id       = 0;
-		var isExtensible = Object.isExtensible || function(){
-		  return true;
-		};
-		var FREEZE = !_fails(function(){
-		  return isExtensible(Object.preventExtensions({}));
-		});
-		var setMeta = function(it){
-		  setDesc(it, META, {value: {
-		    i: 'O' + ++id, // object ID
-		    w: {}          // weak collections IDs
-		  }});
-		};
-		var fastKey = function(it, create){
-		  // return primitive with prefix
-		  if(!isObject(it))return typeof it == 'symbol' ? it : (typeof it == 'string' ? 'S' : 'P') + it;
-		  if(!has(it, META)){
-		    // can't set metadata to uncaught frozen object
-		    if(!isExtensible(it))return 'F';
-		    // not necessary to add metadata
-		    if(!create)return 'E';
-		    // add missing metadata
-		    setMeta(it);
-		  // return object ID
-		  } return it[META].i;
-		};
-		var getWeak = function(it, create){
-		  if(!has(it, META)){
-		    // can't set metadata to uncaught frozen object
-		    if(!isExtensible(it))return true;
-		    // not necessary to add metadata
-		    if(!create)return false;
-		    // add missing metadata
-		    setMeta(it);
-		  // return hash weak collections IDs
-		  } return it[META].w;
-		};
-		// add metadata on freeze-family methods calling
-		var onFreeze = function(it){
-		  if(FREEZE && meta.NEED && isExtensible(it) && !has(it, META))setMeta(it);
-		  return it;
-		};
-		var meta = module.exports = {
-		  KEY:      META,
-		  NEED:     false,
-		  fastKey:  fastKey,
-		  getWeak:  getWeak,
-		  onFreeze: onFreeze
-		};
-		});
-
-		var global$5         = _global;
-		var core$2           = _core;
-		var LIBRARY$1        = _library;
-		var wksExt$1         = _wksExt;
-		var defineProperty$5 = _objectDp.f;
-		var _wksDefine = function(name){
-		  var $Symbol = core$2.Symbol || (core$2.Symbol = LIBRARY$1 ? {} : global$5.Symbol || {});
-		  if(name.charAt(0) != '_' && !(name in $Symbol))defineProperty$5($Symbol, name, {value: wksExt$1.f(name)});
-		};
-
-		var getKeys$1   = _objectKeys;
-		var toIObject$4 = _toIobject;
-		var _keyof = function(object, el){
-		  var O      = toIObject$4(object)
-		    , keys   = getKeys$1(O)
-		    , length = keys.length
-		    , index  = 0
-		    , key;
-		  while(length > index)if(O[key = keys[index++]] === el)return key;
-		};
-
-		var f$2 = Object.getOwnPropertySymbols;
-
-		var _objectGops = {
-			f: f$2
-		};
-
-		var f$3 = {}.propertyIsEnumerable;
-
-		var _objectPie = {
-			f: f$3
-		};
-
-		// all enumerable object keys, includes symbols
-		var getKeys$2 = _objectKeys;
-		var gOPS    = _objectGops;
-		var pIE     = _objectPie;
-		var _enumKeys = function(it){
-		  var result     = getKeys$2(it)
-		    , getSymbols = gOPS.f;
-		  if(getSymbols){
-		    var symbols = getSymbols(it)
-		      , isEnum  = pIE.f
-		      , i       = 0
-		      , key;
-		    while(symbols.length > i)if(isEnum.call(it, key = symbols[i++]))result.push(key);
-		  } return result;
-		};
-
-		// 7.2.2 IsArray(argument)
-		var cof$1 = _cof;
-		var _isArray = Array.isArray || function isArray(arg){
-		  return cof$1(arg) == 'Array';
-		};
-
-		// 19.1.2.7 / 15.2.3.4 Object.getOwnPropertyNames(O)
-		var $keys$2      = _objectKeysInternal;
-		var hiddenKeys = _enumBugKeys.concat('length', 'prototype');
-
-		var f$5 = Object.getOwnPropertyNames || function getOwnPropertyNames(O){
-		  return $keys$2(O, hiddenKeys);
-		};
-
-		var _objectGopn = {
-			f: f$5
-		};
-
-		// fallback for IE11 buggy Object.getOwnPropertyNames with iframe and window
-		var toIObject$5 = _toIobject;
-		var gOPN$1      = _objectGopn.f;
-		var toString$2  = {}.toString;
-
-		var windowNames = typeof window == 'object' && window && Object.getOwnPropertyNames
-		  ? Object.getOwnPropertyNames(window) : [];
-
-		var getWindowNames = function(it){
-		  try {
-		    return gOPN$1(it);
-		  } catch(e){
-		    return windowNames.slice();
-		  }
-		};
-
-		var f$4 = function getOwnPropertyNames(it){
-		  return windowNames && toString$2.call(it) == '[object Window]' ? getWindowNames(it) : gOPN$1(toIObject$5(it));
-		};
-
-		var _objectGopnExt = {
-			f: f$4
-		};
-
-		var pIE$1            = _objectPie;
-		var createDesc$2     = _propertyDesc;
-		var toIObject$6      = _toIobject;
-		var toPrimitive$2    = _toPrimitive;
-		var has$5            = _has;
-		var IE8_DOM_DEFINE$1 = _ie8DomDefine;
-		var gOPD$1           = Object.getOwnPropertyDescriptor;
-
-		var f$6 = _descriptors ? gOPD$1 : function getOwnPropertyDescriptor(O, P){
-		  O = toIObject$6(O);
-		  P = toPrimitive$2(P, true);
-		  if(IE8_DOM_DEFINE$1)try {
-		    return gOPD$1(O, P);
-		  } catch(e){ /* empty */ }
-		  if(has$5(O, P))return createDesc$2(!pIE$1.f.call(O, P), O[P]);
-		};
-
-		var _objectGopd = {
-			f: f$6
-		};
-
-		// ECMAScript 6 symbols shim
-		var global$4         = _global;
-		var has$4            = _has;
-		var DESCRIPTORS    = _descriptors;
-		var $export$4        = _export;
-		var redefine$1       = _redefine;
-		var META           = _meta.KEY;
-		var $fails         = _fails;
-		var shared$1         = _shared;
-		var setToStringTag$2 = _setToStringTag;
-		var uid$1            = _uid;
-		var wks            = _wks;
-		var wksExt         = _wksExt;
-		var wksDefine      = _wksDefine;
-		var keyOf          = _keyof;
-		var enumKeys       = _enumKeys;
-		var isArray$1        = _isArray;
-		var anObject$3       = _anObject;
-		var toIObject$3      = _toIobject;
-		var toPrimitive$1    = _toPrimitive;
-		var createDesc$1     = _propertyDesc;
-		var _create        = _objectCreate;
-		var gOPNExt        = _objectGopnExt;
-		var $GOPD          = _objectGopd;
-		var $DP            = _objectDp;
-		var $keys$1          = _objectKeys;
-		var gOPD           = $GOPD.f;
-		var dP$3             = $DP.f;
-		var gOPN           = gOPNExt.f;
-		var $Symbol        = global$4.Symbol;
-		var $JSON          = global$4.JSON;
-		var _stringify     = $JSON && $JSON.stringify;
-		var PROTOTYPE$2      = 'prototype';
-		var HIDDEN         = wks('_hidden');
-		var TO_PRIMITIVE   = wks('toPrimitive');
-		var isEnum         = {}.propertyIsEnumerable;
-		var SymbolRegistry = shared$1('symbol-registry');
-		var AllSymbols     = shared$1('symbols');
-		var OPSymbols      = shared$1('op-symbols');
-		var ObjectProto$1    = Object[PROTOTYPE$2];
-		var USE_NATIVE     = typeof $Symbol == 'function';
-		var QObject        = global$4.QObject;
-		// Don't use setters in Qt Script, https://github.com/zloirock/core-js/issues/173
-		var setter$1 = !QObject || !QObject[PROTOTYPE$2] || !QObject[PROTOTYPE$2].findChild;
-
-		// fallback for old Android, https://code.google.com/p/v8/issues/detail?id=687
-		var setSymbolDesc = DESCRIPTORS && $fails(function(){
-		  return _create(dP$3({}, 'a', {
-		    get: function(){ return dP$3(this, 'a', {value: 7}).a; }
-		  })).a != 7;
-		}) ? function(it, key, D){
-		  var protoDesc = gOPD(ObjectProto$1, key);
-		  if(protoDesc)delete ObjectProto$1[key];
-		  dP$3(it, key, D);
-		  if(protoDesc && it !== ObjectProto$1)dP$3(ObjectProto$1, key, protoDesc);
-		} : dP$3;
-
-		var wrap = function(tag){
-		  var sym = AllSymbols[tag] = _create($Symbol[PROTOTYPE$2]);
-		  sym._k = tag;
-		  return sym;
-		};
-
-		var isSymbol = USE_NATIVE && typeof $Symbol.iterator == 'symbol' ? function(it){
-		  return typeof it == 'symbol';
-		} : function(it){
-		  return it instanceof $Symbol;
-		};
-
-		var $defineProperty = function defineProperty(it, key, D){
-		  if(it === ObjectProto$1)$defineProperty(OPSymbols, key, D);
-		  anObject$3(it);
-		  key = toPrimitive$1(key, true);
-		  anObject$3(D);
-		  if(has$4(AllSymbols, key)){
-		    if(!D.enumerable){
-		      if(!has$4(it, HIDDEN))dP$3(it, HIDDEN, createDesc$1(1, {}));
-		      it[HIDDEN][key] = true;
-		    } else {
-		      if(has$4(it, HIDDEN) && it[HIDDEN][key])it[HIDDEN][key] = false;
-		      D = _create(D, {enumerable: createDesc$1(0, false)});
-		    } return setSymbolDesc(it, key, D);
-		  } return dP$3(it, key, D);
-		};
-		var $defineProperties = function defineProperties(it, P){
-		  anObject$3(it);
-		  var keys = enumKeys(P = toIObject$3(P))
-		    , i    = 0
-		    , l = keys.length
-		    , key;
-		  while(l > i)$defineProperty(it, key = keys[i++], P[key]);
-		  return it;
-		};
-		var $create = function create(it, P){
-		  return P === undefined ? _create(it) : $defineProperties(_create(it), P);
-		};
-		var $propertyIsEnumerable = function propertyIsEnumerable(key){
-		  var E = isEnum.call(this, key = toPrimitive$1(key, true));
-		  if(this === ObjectProto$1 && has$4(AllSymbols, key) && !has$4(OPSymbols, key))return false;
-		  return E || !has$4(this, key) || !has$4(AllSymbols, key) || has$4(this, HIDDEN) && this[HIDDEN][key] ? E : true;
-		};
-		var $getOwnPropertyDescriptor = function getOwnPropertyDescriptor(it, key){
-		  it  = toIObject$3(it);
-		  key = toPrimitive$1(key, true);
-		  if(it === ObjectProto$1 && has$4(AllSymbols, key) && !has$4(OPSymbols, key))return;
-		  var D = gOPD(it, key);
-		  if(D && has$4(AllSymbols, key) && !(has$4(it, HIDDEN) && it[HIDDEN][key]))D.enumerable = true;
-		  return D;
-		};
-		var $getOwnPropertyNames = function getOwnPropertyNames(it){
-		  var names  = gOPN(toIObject$3(it))
-		    , result = []
-		    , i      = 0
-		    , key;
-		  while(names.length > i){
-		    if(!has$4(AllSymbols, key = names[i++]) && key != HIDDEN && key != META)result.push(key);
-		  } return result;
-		};
-		var $getOwnPropertySymbols = function getOwnPropertySymbols(it){
-		  var IS_OP  = it === ObjectProto$1
-		    , names  = gOPN(IS_OP ? OPSymbols : toIObject$3(it))
-		    , result = []
-		    , i      = 0
-		    , key;
-		  while(names.length > i){
-		    if(has$4(AllSymbols, key = names[i++]) && (IS_OP ? has$4(ObjectProto$1, key) : true))result.push(AllSymbols[key]);
-		  } return result;
-		};
-
-		// 19.4.1.1 Symbol([description])
-		if(!USE_NATIVE){
-		  $Symbol = function Symbol(){
-		    if(this instanceof $Symbol)throw TypeError('Symbol is not a constructor!');
-		    var tag = uid$1(arguments.length > 0 ? arguments[0] : undefined);
-		    var $set = function(value){
-		      if(this === ObjectProto$1)$set.call(OPSymbols, value);
-		      if(has$4(this, HIDDEN) && has$4(this[HIDDEN], tag))this[HIDDEN][tag] = false;
-		      setSymbolDesc(this, tag, createDesc$1(1, value));
-		    };
-		    if(DESCRIPTORS && setter$1)setSymbolDesc(ObjectProto$1, tag, {configurable: true, set: $set});
-		    return wrap(tag);
-		  };
-		  redefine$1($Symbol[PROTOTYPE$2], 'toString', function toString(){
-		    return this._k;
-		  });
-
-		  $GOPD.f = $getOwnPropertyDescriptor;
-		  $DP.f   = $defineProperty;
-		  _objectGopn.f = gOPNExt.f = $getOwnPropertyNames;
-		  _objectPie.f  = $propertyIsEnumerable;
-		  _objectGops.f = $getOwnPropertySymbols;
-
-		  if(DESCRIPTORS && !_library){
-		    redefine$1(ObjectProto$1, 'propertyIsEnumerable', $propertyIsEnumerable, true);
-		  }
-
-		  wksExt.f = function(name){
-		    return wrap(wks(name));
-		  };
-		}
-
-		$export$4($export$4.G + $export$4.W + $export$4.F * !USE_NATIVE, {Symbol: $Symbol});
-
-		for(var symbols = (
-		  // 19.4.2.2, 19.4.2.3, 19.4.2.4, 19.4.2.6, 19.4.2.8, 19.4.2.9, 19.4.2.10, 19.4.2.11, 19.4.2.12, 19.4.2.13, 19.4.2.14
-		  'hasInstance,isConcatSpreadable,iterator,match,replace,search,species,split,toPrimitive,toStringTag,unscopables'
-		).split(','), i$1 = 0; symbols.length > i$1; )wks(symbols[i$1++]);
-
-		for(var symbols = $keys$1(wks.store), i$1 = 0; symbols.length > i$1; )wksDefine(symbols[i$1++]);
-
-		$export$4($export$4.S + $export$4.F * !USE_NATIVE, 'Symbol', {
-		  // 19.4.2.1 Symbol.for(key)
-		  'for': function(key){
-		    return has$4(SymbolRegistry, key += '')
-		      ? SymbolRegistry[key]
-		      : SymbolRegistry[key] = $Symbol(key);
-		  },
-		  // 19.4.2.5 Symbol.keyFor(sym)
-		  keyFor: function keyFor(key){
-		    if(isSymbol(key))return keyOf(SymbolRegistry, key);
-		    throw TypeError(key + ' is not a symbol!');
-		  },
-		  useSetter: function(){ setter$1 = true; },
-		  useSimple: function(){ setter$1 = false; }
-		});
-
-		$export$4($export$4.S + $export$4.F * !USE_NATIVE, 'Object', {
-		  // 19.1.2.2 Object.create(O [, Properties])
-		  create: $create,
-		  // 19.1.2.4 Object.defineProperty(O, P, Attributes)
-		  defineProperty: $defineProperty,
-		  // 19.1.2.3 Object.defineProperties(O, Properties)
-		  defineProperties: $defineProperties,
-		  // 19.1.2.6 Object.getOwnPropertyDescriptor(O, P)
-		  getOwnPropertyDescriptor: $getOwnPropertyDescriptor,
-		  // 19.1.2.7 Object.getOwnPropertyNames(O)
-		  getOwnPropertyNames: $getOwnPropertyNames,
-		  // 19.1.2.8 Object.getOwnPropertySymbols(O)
-		  getOwnPropertySymbols: $getOwnPropertySymbols
-		});
-
-		// 24.3.2 JSON.stringify(value [, replacer [, space]])
-		$JSON && $export$4($export$4.S + $export$4.F * (!USE_NATIVE || $fails(function(){
-		  var S = $Symbol();
-		  // MS Edge converts symbol values to JSON as {}
-		  // WebKit converts symbol values to JSON as null
-		  // V8 throws on boxed symbols
-		  return _stringify([S]) != '[null]' || _stringify({a: S}) != '{}' || _stringify(Object(S)) != '{}';
-		})), 'JSON', {
-		  stringify: function stringify(it){
-		    if(it === undefined || isSymbol(it))return; // IE8 returns string on undefined
-		    var args = [it]
-		      , i    = 1
-		      , replacer, $replacer;
-		    while(arguments.length > i)args.push(arguments[i++]);
-		    replacer = args[1];
-		    if(typeof replacer == 'function')$replacer = replacer;
-		    if($replacer || !isArray$1(replacer))replacer = function(key, value){
-		      if($replacer)value = $replacer.call(this, key, value);
-		      if(!isSymbol(value))return value;
-		    };
-		    args[1] = replacer;
-		    return _stringify.apply($JSON, args);
-		  }
-		});
-
-		// 19.4.3.4 Symbol.prototype[@@toPrimitive](hint)
-		$Symbol[PROTOTYPE$2][TO_PRIMITIVE] || _hide($Symbol[PROTOTYPE$2], TO_PRIMITIVE, $Symbol[PROTOTYPE$2].valueOf);
-		// 19.4.3.5 Symbol.prototype[@@toStringTag]
-		setToStringTag$2($Symbol, 'Symbol');
-		// 20.2.1.9 Math[@@toStringTag]
-		setToStringTag$2(Math, 'Math', true);
-		// 24.3.3 JSON[@@toStringTag]
-		setToStringTag$2(global$4.JSON, 'JSON', true);
-
-		_wksDefine('asyncIterator');
-
-		_wksDefine('observable');
-
-		var index = _core.Symbol;
-
-		var symbol = createCommonjsModule(function (module) {
-		module.exports = { "default": index, __esModule: true };
-		});
-
-		var _typeof_1 = createCommonjsModule(function (module, exports) {
-		"use strict";
-
-		exports.__esModule = true;
-
-		var _iterator = iterator;
-
-		var _iterator2 = _interopRequireDefault(_iterator);
-
-		var _symbol = symbol;
-
-		var _symbol2 = _interopRequireDefault(_symbol);
-
-		var _typeof = typeof _symbol2.default === "function" && typeof _iterator2.default === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof _symbol2.default === "function" && obj.constructor === _symbol2.default && obj !== _symbol2.default.prototype ? "symbol" : typeof obj; };
-
-		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-		exports.default = typeof _symbol2.default === "function" && _typeof(_iterator2.default) === "symbol" ? function (obj) {
-		  return typeof obj === "undefined" ? "undefined" : _typeof(obj);
-		} : function (obj) {
-		  return obj && typeof _symbol2.default === "function" && obj.constructor === _symbol2.default && obj !== _symbol2.default.prototype ? "symbol" : typeof obj === "undefined" ? "undefined" : _typeof(obj);
-		};
-		});
-
-		var possibleConstructorReturn = createCommonjsModule(function (module, exports) {
-		"use strict";
-
-		exports.__esModule = true;
-
-		var _typeof2 = _typeof_1;
-
-		var _typeof3 = _interopRequireDefault(_typeof2);
-
-		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-		exports.default = function (self, call) {
-		  if (!self) {
-		    throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
-		  }
-
-		  return call && ((typeof call === "undefined" ? "undefined" : (0, _typeof3.default)(call)) === "object" || typeof call === "function") ? call : self;
-		};
-		});
-
-		var _possibleConstructorReturn = unwrapExports(possibleConstructorReturn);
-
-		// Works with __proto__ only. Old v8 can't work with null proto objects.
-		/* eslint-disable no-proto */
-		var isObject$3 = _isObject;
-		var anObject$4 = _anObject;
-		var check = function(O, proto){
-		  anObject$4(O);
-		  if(!isObject$3(proto) && proto !== null)throw TypeError(proto + ": can't set as prototype!");
-		};
-		var _setProto = {
-		  set: Object.setPrototypeOf || ('__proto__' in {} ? // eslint-disable-line
-		    function(test, buggy, set){
-		      try {
-		        set = _ctx(Function.call, _objectGopd.f(Object.prototype, '__proto__').set, 2);
-		        set(test, []);
-		        buggy = !(test instanceof Array);
-		      } catch(e){ buggy = true; }
-		      return function setPrototypeOf(O, proto){
-		        check(O, proto);
-		        if(buggy)O.__proto__ = proto;
-		        else set(O, proto);
-		        return O;
-		      };
-		    }({}, false) : undefined),
-		  check: check
-		};
-
-		// 19.1.3.19 Object.setPrototypeOf(O, proto)
-		var $export$5 = _export;
-		$export$5($export$5.S, 'Object', {setPrototypeOf: _setProto.set});
-
-		var setPrototypeOf$3 = _core.Object.setPrototypeOf;
-
-		var setPrototypeOf$1 = createCommonjsModule(function (module) {
-		module.exports = { "default": setPrototypeOf$3, __esModule: true };
-		});
-
-		var $export$6 = _export;
-		// 19.1.2.2 / 15.2.3.5 Object.create(O [, Properties])
-		$export$6($export$6.S, 'Object', {create: _objectCreate});
-
-		var $Object$1 = _core.Object;
-		var create$4 = function create$4(P, D){
-		  return $Object$1.create(P, D);
-		};
-
-		var create$2 = createCommonjsModule(function (module) {
-		module.exports = { "default": create$4, __esModule: true };
-		});
-
-		var inherits = createCommonjsModule(function (module, exports) {
-		"use strict";
-
-		exports.__esModule = true;
-
-		var _setPrototypeOf = setPrototypeOf$1;
-
-		var _setPrototypeOf2 = _interopRequireDefault(_setPrototypeOf);
-
-		var _create = create$2;
-
-		var _create2 = _interopRequireDefault(_create);
-
-		var _typeof2 = _typeof_1;
-
-		var _typeof3 = _interopRequireDefault(_typeof2);
-
-		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-		exports.default = function (subClass, superClass) {
-		  if (typeof superClass !== "function" && superClass !== null) {
-		    throw new TypeError("Super expression must either be null or a function, not " + (typeof superClass === "undefined" ? "undefined" : (0, _typeof3.default)(superClass)));
-		  }
-
-		  subClass.prototype = (0, _create2.default)(superClass && superClass.prototype, {
-		    constructor: {
-		      value: subClass,
-		      enumerable: false,
-		      writable: true,
-		      configurable: true
-		    }
-		  });
-		  if (superClass) _setPrototypeOf2.default ? (0, _setPrototypeOf2.default)(subClass, superClass) : subClass.__proto__ = superClass;
-		};
-		});
-
-		var _inherits = unwrapExports(inherits);
-
-		/*
-		 * QRious
-		 * Copyright (C) 2016 Alasdair Mercer
-		 * Copyright (C) 2010 Tom Zerucha
-		 *
-		 * This program is free software: you can redistribute it and/or modify
-		 * it under the terms of the GNU General Public License as published by
-		 * the Free Software Foundation, either version 3 of the License, or
-		 * (at your option) any later version.
-		 *
-		 * This program is distributed in the hope that it will be useful,
-		 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-		 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-		 * GNU General Public License for more details.
-		 *
-		 * You should have received a copy of the GNU General Public License
-		 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-		 */
-
-		/**
-		 * Contains utility methods that are useful throughout the library.
-		 *
-		 * @public
-		 */
-		var Utilities = function () {
-		  function Utilities() {
-		    _classCallCheck(this, Utilities);
-		  }
-
-		  _createClass(Utilities, null, [{
-		    key: 'abs',
-
-
-		    /**
-		     * Returns the absolute value of a given number.
-		     *
-		     * This method is simply a convenient shorthand for <code>Math.abs</code> while ensuring that nulls are returned as
-		     * <code>null</code> instead of zero.
-		     *
-		     * @param {number} value - the number whose absolute value is to be returned
-		     * @return {number} The absolute value of <code>value</code> or <code>null</code> if <code>value</code> is
-		     * <code>null</code>.
-		     * @public
-		     * @static
-		     */
-		    value: function abs(value) {
-		      return value != null ? Math.abs(value) : null;
-		    }
-
-		    /**
-		     * Copies all properties from the <code>source</code> object to the <code>target</code> object, however, all property
-		     * names on the <code>target</code> will be prefixed with an underscore, used to indicate that they are private.
-		     *
-		     * @param {Object} target - the object to which the private fields are to be copied
-		     * @param {Object} source - the object from which the fields are to be copied
-		     * @return {Object} A reference to the <code>target</code> object.
-		     * @public
-		     * @static
-		     */
-
-		  }, {
-		    key: 'privatize',
-		    value: function privatize(target, source) {
-		      for (var key in source) {
-		        if (Object.prototype.hasOwnProperty.call(source, key)) {
-		          target['_' + key] = source[key];
-		        }
-		      }
-
-		      return target;
-		    }
-
-		    /**
-		     * Sets the specified <code>value</code> on a given field on the <code>object</code> provided.
-		     *
-		     * If <code>value</code> is <code>null</code>, the specified default value will be used instead.
-		     *
-		     * An optional <code>transformer</code> can be specified which will be used to transform the value (or default value)
-		     * before it is assigned to the field.
-		     *
-		     * @param {Object} object - the object whose field is to be set with <code>value</code>
-		     * @param {string} fieldName - the field to be set with <code>value</code>
-		     * @param {*} value - the value to be set on the named field
-		     * @param {*} [defaultValue] - the value to be used if <code>value</code> is <code>null</code>
-		     * @param {Function} [transformer] - a function used to transform the value before it is assigned to the named field
-		     * @return {boolean} <code>true</code> if the value of the field has changed as a result of the assignment; otherwise
-		     * <code>false</code>.
-		     * @public
-		     * @static
-		     */
-
-		  }, {
-		    key: 'setter',
-		    value: function setter(object, fieldName, value, defaultValue, transformer) {
-		      var oldValue = object[fieldName];
-		      var newValue = value != null ? value : defaultValue;
-		      if (typeof transformer === 'function') {
-		        newValue = transformer(newValue);
-		      }
-
-		      object[fieldName] = newValue;
-
-		      return newValue !== oldValue;
-		    }
-
-		    /**
-		     * Throws an error indicating that the a given method on a specific class has not been implemented.
-		     *
-		     * @param {string} className - the name of the class on which the method has not been implemented
-		     * @param {string} methodName - the name of the method which has not been implemented
-		     * @return {void}
-		     * @throws {Error} The error describing the class method which has not been implemented.
-		     * @public
-		     * @static
-		     */
-
-		  }, {
-		    key: 'throwUnimplemented',
-		    value: function throwUnimplemented(className, methodName) {
-		      throw new Error('"' + methodName + '" method must be implemented on the ' + className + ' class');
-		    }
-
-		    /**
-		     * Transforms the specified <code>string</code> to upper case while remaining null-safe.
-		     *
-		     * @param {string} string - the string to be transformed to upper case
-		     * @return {string} <code>string</code> transformed to upper case if <code>string</code> is not <code>null</code>.
-		     * @public
-		     * @static
-		     */
-
-		  }, {
-		    key: 'toUpperCase',
-		    value: function toUpperCase(string) {
-		      return string != null && string.toUpperCase();
-		    }
-		  }]);
-
-		  return Utilities;
-		}();
-
-		/*
-		 * QRious
-		 * Copyright (C) 2016 Alasdair Mercer
-		 * Copyright (C) 2010 Tom Zerucha
-		 *
-		 * This program is free software: you can redistribute it and/or modify
-		 * it under the terms of the GNU General Public License as published by
-		 * the Free Software Foundation, either version 3 of the License, or
-		 * (at your option) any later version.
-		 *
-		 * This program is distributed in the hope that it will be useful,
-		 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-		 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-		 * GNU General Public License for more details.
-		 *
-		 * You should have received a copy of the GNU General Public License
-		 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-		 */
-
-		/**
-		 * Defines a service contract that must be met by all implementations.
-		 *
-		 * @public
-		 */
-
-		var Service = function () {
-		  function Service() {
-		    _classCallCheck(this, Service);
-		  }
-
-		  _createClass(Service, [{
-		    key: 'getName',
-
-
-		    /**
-		     * Returns the name of this {@link Service}.
-		     *
-		     * @return {string} The service name.
-		     * @public
-		     */
-		    value: function getName() {
-		      Utilities.throwUnimplemented('Service', 'getName');
-		    }
-		  }]);
-
-		  return Service;
-		}();
-
-		/*
-		 * QRious
-		 * Copyright (C) 2016 Alasdair Mercer
-		 * Copyright (C) 2010 Tom Zerucha
-		 *
-		 * This program is free software: you can redistribute it and/or modify
-		 * it under the terms of the GNU General Public License as published by
-		 * the Free Software Foundation, either version 3 of the License, or
-		 * (at your option) any later version.
-		 *
-		 * This program is distributed in the hope that it will be useful,
-		 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-		 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-		 * GNU General Public License for more details.
-		 *
-		 * You should have received a copy of the GNU General Public License
-		 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-		 */
-
-		/**
-		 * A service for working with elements.
-		 *
-		 * @public
-		 * @extends Service
-		 */
-
-		var ElementService = function (_Service) {
-		  _inherits(ElementService, _Service);
-
-		  function ElementService() {
-		    _classCallCheck(this, ElementService);
-
-		    return _possibleConstructorReturn(this, (ElementService.__proto__ || _Object$getPrototypeOf(ElementService)).apply(this, arguments));
-		  }
-
-		  _createClass(ElementService, [{
-		    key: 'createCanvas',
-
-
-		    /**
-		     * Creates an instance of a canvas element.
-		     *
-		     * @return {*} The newly created canvas element.
-		     * @public
-		     */
-		    value: function createCanvas() {
-		      Utilities.throwUnimplemented('ElementService', 'createCanvas');
-		    }
-
-		    /**
-		     * Creates an instance of a image element.
-		     *
-		     * @return {*} The newly created image element.
-		     * @public
-		     */
-
-		  }, {
-		    key: 'createImage',
-		    value: function createImage() {
-		      Utilities.throwUnimplemented('ElementService', 'createImage');
-		    }
-
-		    /**
-		     * @override
-		     */
-
-		  }, {
-		    key: 'getName',
-		    value: function getName() {
-		      return 'element';
-		    }
-
-		    /**
-		     * Returns whether the specified <code>element</code> is a canvas.
-		     *
-		     * @param {*} element - the element to be checked
-		     * @return {boolean} <code>true</code> if <code>element</code> is a canvas; otherwise <code>false</code>.
-		     * @public
-		     */
-
-		  }, {
-		    key: 'isCanvas',
-		    value: function isCanvas(element) {
-		      Utilities.throwUnimplemented('ElementService', 'isCanvas');
-		    }
-
-		    /**
-		     * Returns whether the specified <code>element</code> is an image.
-		     *
-		     * @param {*} element - the element to be checked
-		     * @return {boolean} <code>true</code> if <code>element</code> is an image; otherwise <code>false</code>.
-		     * @public
-		     */
-
-		  }, {
-		    key: 'isImage',
-		    value: function isImage(element) {
-		      Utilities.throwUnimplemented('ElementService', 'isImage');
-		    }
-		  }]);
-
-		  return ElementService;
-		}(Service);
-
-		/*
-		 * QRious
-		 * Copyright (C) 2016 Alasdair Mercer
-		 * Copyright (C) 2010 Tom Zerucha
-		 *
-		 * This program is free software: you can redistribute it and/or modify
-		 * it under the terms of the GNU General Public License as published by
-		 * the Free Software Foundation, either version 3 of the License, or
-		 * (at your option) any later version.
-		 *
-		 * This program is distributed in the hope that it will be useful,
-		 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-		 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-		 * GNU General Public License for more details.
-		 *
-		 * You should have received a copy of the GNU General Public License
-		 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-		 */
-
-		/**
-		 * An implementation of {@link ElementService} intended for use within a browser environment.
-		 *
-		 * @public
-		 * @extends ElementService
-		 */
-
-		var BrowserElementService = function (_ElementService) {
-		  _inherits(BrowserElementService, _ElementService);
-
-		  function BrowserElementService() {
-		    _classCallCheck(this, BrowserElementService);
-
-		    return _possibleConstructorReturn(this, (BrowserElementService.__proto__ || _Object$getPrototypeOf(BrowserElementService)).apply(this, arguments));
-		  }
-
-		  _createClass(BrowserElementService, [{
-		    key: 'createCanvas',
-
-
-		    /**
-		     * @override
-		     */
-		    value: function createCanvas() {
-		      return document.createElement('canvas');
-		    }
-
-		    /**
-		     * @override
-		     */
-
-		  }, {
-		    key: 'createImage',
-		    value: function createImage() {
-		      return document.createElement('img');
-		    }
-
-		    /**
-		     * @override
-		     */
-
-		  }, {
-		    key: 'isCanvas',
-		    value: function isCanvas(element) {
-		      return element instanceof HTMLCanvasElement;
-		    }
-
-		    /**
-		     * @override
-		     */
-
-		  }, {
-		    key: 'isImage',
-		    value: function isImage(element) {
-		      return element instanceof HTMLImageElement;
-		    }
-		  }]);
-
-		  return BrowserElementService;
-		}(ElementService);
-
-		// 19.1.2.1 Object.assign(target, source, ...)
-		var getKeys$3  = _objectKeys;
-		var gOPS$1     = _objectGops;
-		var pIE$2      = _objectPie;
-		var toObject$2 = _toObject;
-		var IObject$1  = _iobject;
-		var $assign  = Object.assign;
-
-		// should work with symbols and should have deterministic property order (V8 bug)
-		var _objectAssign = !$assign || _fails(function(){
-		  var A = {}
-		    , B = {}
-		    , S = Symbol()
-		    , K = 'abcdefghijklmnopqrst';
-		  A[S] = 7;
-		  K.split('').forEach(function(k){ B[k] = k; });
-		  return $assign({}, A)[S] != 7 || Object.keys($assign({}, B)).join('') != K;
-		}) ? function assign(target, source){ // eslint-disable-line no-unused-vars
-		  var T     = toObject$2(target)
-		    , aLen  = arguments.length
-		    , index = 1
-		    , getSymbols = gOPS$1.f
-		    , isEnum     = pIE$2.f;
-		  while(aLen > index){
-		    var S      = IObject$1(arguments[index++])
-		      , keys   = getSymbols ? getKeys$3(S).concat(getSymbols(S)) : getKeys$3(S)
-		      , length = keys.length
-		      , j      = 0
-		      , key;
-		    while(length > j)if(isEnum.call(S, key = keys[j++]))T[key] = S[key];
-		  } return T;
-		} : $assign;
-
-		// 19.1.3.1 Object.assign(target, source)
-		var $export$7 = _export;
-
-		$export$7($export$7.S + $export$7.F, 'Object', {assign: _objectAssign});
-
-		var assign$2 = _core.Object.assign;
-
-		var assign$1 = createCommonjsModule(function (module) {
-		module.exports = { "default": assign$2, __esModule: true };
-		});
-
-		var _Object$assign = unwrapExports(assign$1);
-
-		/*
-		 * QRious
-		 * Copyright (C) 2016 Alasdair Mercer
-		 * Copyright (C) 2010 Tom Zerucha
-		 *
-		 * This program is free software: you can redistribute it and/or modify
-		 * it under the terms of the GNU General Public License as published by
-		 * the Free Software Foundation, either version 3 of the License, or
-		 * (at your option) any later version.
-		 *
-		 * This program is distributed in the hope that it will be useful,
-		 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-		 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-		 * GNU General Public License for more details.
-		 *
-		 * You should have received a copy of the GNU General Public License
-		 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-		 */
-
-		/**
-		 * Responsible for rendering a QR code {@link Frame} on a specific type of element.
-		 *
-		 * A renderer may be dependant on the rendering of another element, so ordering of their execution is important.
-		 *
-		 * @public
-		 */
-
-		var Renderer = function () {
-
-		  /**
-		   * Creates a new instance of {@link Renderer} for the <code>qrious</code> instance provided.
-		   *
-		   * @param {QRious} qrious - the {@link QRious} instance to be used
-		   * @public
-		   */
-		  function Renderer(qrious) {
-		    _classCallCheck(this, Renderer);
-
-		    /**
-		     * The {@link QRious} instance.
-		     *
-		     * @protected
-		     * @type {QRious}
-		     */
-		    this.qrious = qrious;
-		  }
-
-		  /**
-		   * Draws the specified QR code <code>frame</code> on the underlying element.
-		   *
-		   * Implementations of {@link Renderer} <b>must</b> override this method with their own specific logic.
-		   *
-		   * @param {Frame} frame - the {@link Frame} to be drawn
-		   * @return {void}
-		   * @protected
-		   */
-
-
-		  _createClass(Renderer, [{
-		    key: 'draw',
-		    value: function draw(frame) {
-		      Utilities.throwUnimplemented('Renderer', 'draw');
-		    }
-
-		    /**
-		     * Calculates the size (in pixel units) to represent an individual module within the QR code based on the
-		     * <code>frame</code> provided.
-		     *
-		     * Any configured padding will be excluded from the returned size.
-		     *
-		     * The returned value will be at least one, even in cases where the size of the QR code does not fit its contents.
-		     * This is done so that the inevitable clipping is handled more gracefully since this way at least something is
-		     * displayed instead of just a blank space filled by the background color.
-		     *
-		     * @param {Frame} frame - the {@link Frame} from which the module size is to be derived
-		     * @return {number} The pixel size for each module in the QR code which will be no less than one.
-		     * @protected
-		     */
-
-		  }, {
-		    key: 'getModuleSize',
-		    value: function getModuleSize(frame) {
-		      var padding = this.qrious.padding || 0;
-		      var pixels = Math.floor((this.qrious.size - padding * 2) / frame.width);
-
-		      return Math.max(1, pixels);
-		    }
-
-		    /**
-		     * Calculates the offset/padding (in pixel units) to be inserted before the QR code based on the <code>frame</code>
-		     * provided.
-		     *
-		     * The returned value will be zero if there is no available offset or if the size of the QR code does not fit its
-		     * contents. It will never be a negative value. This is done so that the inevitable clipping appears more naturally
-		     * and it is not clipped from all directions.
-		     *
-		     * @param {Frame} frame - the {@link Frame} from which the offset is to be derived
-		     * @return {number} The pixel offset for the QR code which will be no less than zero.
-		     * @protected
-		     */
-
-		  }, {
-		    key: 'getOffset',
-		    value: function getOffset(frame) {
-		      if (this.qrious.padding != null) {
-		        return this.qrious.padding;
-		      }
-
-		      var moduleSize = this.getModuleSize(frame);
-		      var offset = Math.floor((this.qrious.size - moduleSize * frame.width) / 2);
-
-		      return Math.max(0, offset);
-		    }
-
-		    /**
-		     * Renders a QR code on the underlying element based on the <code>frame</code> provided.
-		     *
-		     * @param {Frame} frame - the {@link Frame} to be rendered
-		     * @return {void}
-		     * @public
-		     */
-
-		  }, {
-		    key: 'render',
-		    value: function render(frame) {
-		      this.resize();
-		      this.reset();
-		      this.draw(frame);
-		    }
-
-		    /**
-		     * Resets the underlying element, effectively clearing any previously rendered QR code.
-		     *
-		     * Implementations of {@link Renderer} <b>must</b> override this method with their own specific logic.
-		     *
-		     * @return {void}
-		     * @protected
-		     */
-
-		  }, {
-		    key: 'reset',
-		    value: function reset() {
-		      Utilities.throwUnimplemented('Renderer', 'reset');
-		    }
-
-		    /**
-		     * Ensures that the size of the underlying element matches that defined on the associated {@link QRious} instance.
-		     *
-		     * Implementations of {@link Renderer} <b>must</b> override this method with their own specific logic.
-		     *
-		     * @return {void}
-		     * @protected
-		     */
-
-		  }, {
-		    key: 'resize',
-		    value: function resize() {
-		      Utilities.throwUnimplemented('Renderer', 'resize');
-		    }
-		  }]);
-
-		  return Renderer;
-		}();
-
-		/*
-		 * QRious
-		 * Copyright (C) 2016 Alasdair Mercer
-		 * Copyright (C) 2010 Tom Zerucha
-		 *
-		 * This program is free software: you can redistribute it and/or modify
-		 * it under the terms of the GNU General Public License as published by
-		 * the Free Software Foundation, either version 3 of the License, or
-		 * (at your option) any later version.
-		 *
-		 * This program is distributed in the hope that it will be useful,
-		 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-		 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-		 * GNU General Public License for more details.
-		 *
-		 * You should have received a copy of the GNU General Public License
-		 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-		 */
-
-		/**
-		 * An implementation of {@link Renderer} for working with <code>canvas</code> elements.
-		 *
-		 * @public
-		 * @extends Renderer
-		 */
-
-		var CanvasRenderer = function (_Renderer) {
-		  _inherits(CanvasRenderer, _Renderer);
-
-		  function CanvasRenderer() {
-		    _classCallCheck(this, CanvasRenderer);
-
-		    return _possibleConstructorReturn(this, (CanvasRenderer.__proto__ || _Object$getPrototypeOf(CanvasRenderer)).apply(this, arguments));
-		  }
-
-		  _createClass(CanvasRenderer, [{
-		    key: 'draw',
-
-
-		    /**
-		     * @override
-		     */
-		    value: function draw(frame) {
-		      var qrious = this.qrious;
-		      var moduleSize = this.getModuleSize(frame);
-		      var offset = this.getOffset(frame);
-		      var context = qrious.canvas.getContext('2d');
-
-		      context.fillStyle = qrious.foreground;
-		      context.globalAlpha = qrious.foregroundAlpha;
-
-		      for (var i = 0; i < frame.width; i++) {
-		        for (var j = 0; j < frame.width; j++) {
-		          if (frame.buffer[j * frame.width + i]) {
-		            context.fillRect(moduleSize * i + offset, moduleSize * j + offset, moduleSize, moduleSize);
-		          }
-		        }
-		      }
-		    }
-
-		    /**
-		     * @override
-		     */
-
-		  }, {
-		    key: 'reset',
-		    value: function reset() {
-		      var qrious = this.qrious;
-		      var context = qrious.canvas.getContext('2d');
-
-		      context.lineWidth = 1;
-		      context.clearRect(0, 0, qrious.size, qrious.size);
-		      context.fillStyle = qrious.background;
-		      context.globalAlpha = qrious.backgroundAlpha;
-		      context.fillRect(0, 0, qrious.size, qrious.size);
-		    }
-
-		    /**
-		     * @override
-		     */
-
-		  }, {
-		    key: 'resize',
-		    value: function resize() {
-		      var qrious = this.qrious;
-		      var canvas = qrious.canvas;
-
-		      canvas.width = qrious.size;
-		      canvas.height = qrious.size;
-		    }
-		  }]);
-
-		  return CanvasRenderer;
-		}(Renderer);
-
-		/*
-		 * QRious
-		 * Copyright (C) 2016 Alasdair Mercer
-		 * Copyright (C) 2010 Tom Zerucha
-		 *
-		 * This program is free software: you can redistribute it and/or modify
-		 * it under the terms of the GNU General Public License as published by
-		 * the Free Software Foundation, either version 3 of the License, or
-		 * (at your option) any later version.
-		 *
-		 * This program is distributed in the hope that it will be useful,
-		 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-		 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-		 * GNU General Public License for more details.
-		 *
-		 * You should have received a copy of the GNU General Public License
-		 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-		 */
-
-		/* eslint no-multi-spaces: "off" */
-
-		/**
-		 * Contains alignment pattern information.
-		 *
-		 * @public
-		 */
-		var Alignment = function () {
-		  function Alignment() {
-		    _classCallCheck(this, Alignment);
-		  }
-
-		  _createClass(Alignment, null, [{
-		    key: "BLOCK",
-
-
-		    /**
-		     * Returns the alignment pattern block.
-		     *
-		     * @return {number[]} The alignment pattern block.
-		     * @public
-		     * @static
-		     */
-		    get: function get() {
-		      return [0, 11, 15, 19, 23, 27, 31, 16, 18, 20, 22, 24, 26, 28, 20, 22, 24, 24, 26, 28, 28, 22, 24, 24, 26, 26, 28, 28, 24, 24, 26, 26, 26, 28, 28, 24, 26, 26, 26, 28, 28];
-		    }
-		  }]);
-
-		  return Alignment;
-		}();
-
-		/*
-		 * QRious
-		 * Copyright (C) 2016 Alasdair Mercer
-		 * Copyright (C) 2010 Tom Zerucha
-		 *
-		 * This program is free software: you can redistribute it and/or modify
-		 * it under the terms of the GNU General Public License as published by
-		 * the Free Software Foundation, either version 3 of the License, or
-		 * (at your option) any later version.
-		 *
-		 * This program is distributed in the hope that it will be useful,
-		 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-		 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-		 * GNU General Public License for more details.
-		 *
-		 * You should have received a copy of the GNU General Public License
-		 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-		 */
-
-		/* eslint no-multi-spaces: "off" */
-
-		/**
-		 * Contains error correction information.
-		 *
-		 * @public
-		 */
-		var ErrorCorrection = function () {
-		  function ErrorCorrection() {
-		    _classCallCheck(this, ErrorCorrection);
-		  }
-
-		  _createClass(ErrorCorrection, null, [{
-		    key: "BLOCKS",
-
-
-		    /**
-		     * Returns the error correction blocks.
-		     *
-		     * There are four elements per version. The first two indicate the number of blocks, then the data width, and finally
-		     * the ECC width.
-		     *
-		     * @return {number[]} The ECC blocks.
-		     * @public
-		     * @static
-		     */
-		    get: function get() {
-		      return [1, 0, 19, 7, 1, 0, 16, 10, 1, 0, 13, 13, 1, 0, 9, 17, 1, 0, 34, 10, 1, 0, 28, 16, 1, 0, 22, 22, 1, 0, 16, 28, 1, 0, 55, 15, 1, 0, 44, 26, 2, 0, 17, 18, 2, 0, 13, 22, 1, 0, 80, 20, 2, 0, 32, 18, 2, 0, 24, 26, 4, 0, 9, 16, 1, 0, 108, 26, 2, 0, 43, 24, 2, 2, 15, 18, 2, 2, 11, 22, 2, 0, 68, 18, 4, 0, 27, 16, 4, 0, 19, 24, 4, 0, 15, 28, 2, 0, 78, 20, 4, 0, 31, 18, 2, 4, 14, 18, 4, 1, 13, 26, 2, 0, 97, 24, 2, 2, 38, 22, 4, 2, 18, 22, 4, 2, 14, 26, 2, 0, 116, 30, 3, 2, 36, 22, 4, 4, 16, 20, 4, 4, 12, 24, 2, 2, 68, 18, 4, 1, 43, 26, 6, 2, 19, 24, 6, 2, 15, 28, 4, 0, 81, 20, 1, 4, 50, 30, 4, 4, 22, 28, 3, 8, 12, 24, 2, 2, 92, 24, 6, 2, 36, 22, 4, 6, 20, 26, 7, 4, 14, 28, 4, 0, 107, 26, 8, 1, 37, 22, 8, 4, 20, 24, 12, 4, 11, 22, 3, 1, 115, 30, 4, 5, 40, 24, 11, 5, 16, 20, 11, 5, 12, 24, 5, 1, 87, 22, 5, 5, 41, 24, 5, 7, 24, 30, 11, 7, 12, 24, 5, 1, 98, 24, 7, 3, 45, 28, 15, 2, 19, 24, 3, 13, 15, 30, 1, 5, 107, 28, 10, 1, 46, 28, 1, 15, 22, 28, 2, 17, 14, 28, 5, 1, 120, 30, 9, 4, 43, 26, 17, 1, 22, 28, 2, 19, 14, 28, 3, 4, 113, 28, 3, 11, 44, 26, 17, 4, 21, 26, 9, 16, 13, 26, 3, 5, 107, 28, 3, 13, 41, 26, 15, 5, 24, 30, 15, 10, 15, 28, 4, 4, 116, 28, 17, 0, 42, 26, 17, 6, 22, 28, 19, 6, 16, 30, 2, 7, 111, 28, 17, 0, 46, 28, 7, 16, 24, 30, 34, 0, 13, 24, 4, 5, 121, 30, 4, 14, 47, 28, 11, 14, 24, 30, 16, 14, 15, 30, 6, 4, 117, 30, 6, 14, 45, 28, 11, 16, 24, 30, 30, 2, 16, 30, 8, 4, 106, 26, 8, 13, 47, 28, 7, 22, 24, 30, 22, 13, 15, 30, 10, 2, 114, 28, 19, 4, 46, 28, 28, 6, 22, 28, 33, 4, 16, 30, 8, 4, 122, 30, 22, 3, 45, 28, 8, 26, 23, 30, 12, 28, 15, 30, 3, 10, 117, 30, 3, 23, 45, 28, 4, 31, 24, 30, 11, 31, 15, 30, 7, 7, 116, 30, 21, 7, 45, 28, 1, 37, 23, 30, 19, 26, 15, 30, 5, 10, 115, 30, 19, 10, 47, 28, 15, 25, 24, 30, 23, 25, 15, 30, 13, 3, 115, 30, 2, 29, 46, 28, 42, 1, 24, 30, 23, 28, 15, 30, 17, 0, 115, 30, 10, 23, 46, 28, 10, 35, 24, 30, 19, 35, 15, 30, 17, 1, 115, 30, 14, 21, 46, 28, 29, 19, 24, 30, 11, 46, 15, 30, 13, 6, 115, 30, 14, 23, 46, 28, 44, 7, 24, 30, 59, 1, 16, 30, 12, 7, 121, 30, 12, 26, 47, 28, 39, 14, 24, 30, 22, 41, 15, 30, 6, 14, 121, 30, 6, 34, 47, 28, 46, 10, 24, 30, 2, 64, 15, 30, 17, 4, 122, 30, 29, 14, 46, 28, 49, 10, 24, 30, 24, 46, 15, 30, 4, 18, 122, 30, 13, 32, 46, 28, 48, 14, 24, 30, 42, 32, 15, 30, 20, 4, 117, 30, 40, 7, 47, 28, 43, 22, 24, 30, 10, 67, 15, 30, 19, 6, 118, 30, 18, 31, 47, 28, 34, 34, 24, 30, 20, 61, 15, 30];
-		    }
-
-		    /**
-		     * Returns the final format bits with mask (level << 3 | mask).
-		     *
-		     * @return {number[]} The final format bits.
-		     * @public
-		     * @static
-		     */
-
-		  }, {
-		    key: "FINAL_FORMAT",
-		    get: function get() {
-		      return [
-		      // L
-		      0x77c4, 0x72f3, 0x7daa, 0x789d, 0x662f, 0x6318, 0x6c41, 0x6976,
-		      // M
-		      0x5412, 0x5125, 0x5e7c, 0x5b4b, 0x45f9, 0x40ce, 0x4f97, 0x4aa0,
-		      // Q
-		      0x355f, 0x3068, 0x3f31, 0x3a06, 0x24b4, 0x2183, 0x2eda, 0x2bed,
-		      // H
-		      0x1689, 0x13be, 0x1ce7, 0x19d0, 0x0762, 0x0255, 0x0d0c, 0x083b];
-		    }
-
-		    /**
-		     * Returns a map of human-readable ECC levels.
-		     *
-		     * @return {Object<string, number>} A ECC level mapping.
-		     * @public
-		     * @static
-		     */
-
-		  }, {
-		    key: "LEVELS",
-		    get: function get() {
-		      return {
-		        L: 1,
-		        M: 2,
-		        Q: 3,
-		        H: 4
-		      };
-		    }
-		  }]);
-
-		  return ErrorCorrection;
-		}();
-
-		/*
-		 * QRious
-		 * Copyright (C) 2016 Alasdair Mercer
-		 * Copyright (C) 2010 Tom Zerucha
-		 *
-		 * This program is free software: you can redistribute it and/or modify
-		 * it under the terms of the GNU General Public License as published by
-		 * the Free Software Foundation, either version 3 of the License, or
-		 * (at your option) any later version.
-		 *
-		 * This program is distributed in the hope that it will be useful,
-		 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-		 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-		 * GNU General Public License for more details.
-		 *
-		 * You should have received a copy of the GNU General Public License
-		 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-		 */
-
-		/**
-		 * Contains Galois field information.
-		 *
-		 * @public
-		 */
-		var Galois = function () {
-		  function Galois() {
-		    _classCallCheck(this, Galois);
-		  }
-
-		  _createClass(Galois, null, [{
-		    key: "EXPONENT",
-
-
-		    /**
-		     * Returns the Galois field exponent table.
-		     *
-		     * @return {number[]} The Galois field exponent table.
-		     * @public
-		     * @static
-		     */
-		    get: function get() {
-		      return [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1d, 0x3a, 0x74, 0xe8, 0xcd, 0x87, 0x13, 0x26, 0x4c, 0x98, 0x2d, 0x5a, 0xb4, 0x75, 0xea, 0xc9, 0x8f, 0x03, 0x06, 0x0c, 0x18, 0x30, 0x60, 0xc0, 0x9d, 0x27, 0x4e, 0x9c, 0x25, 0x4a, 0x94, 0x35, 0x6a, 0xd4, 0xb5, 0x77, 0xee, 0xc1, 0x9f, 0x23, 0x46, 0x8c, 0x05, 0x0a, 0x14, 0x28, 0x50, 0xa0, 0x5d, 0xba, 0x69, 0xd2, 0xb9, 0x6f, 0xde, 0xa1, 0x5f, 0xbe, 0x61, 0xc2, 0x99, 0x2f, 0x5e, 0xbc, 0x65, 0xca, 0x89, 0x0f, 0x1e, 0x3c, 0x78, 0xf0, 0xfd, 0xe7, 0xd3, 0xbb, 0x6b, 0xd6, 0xb1, 0x7f, 0xfe, 0xe1, 0xdf, 0xa3, 0x5b, 0xb6, 0x71, 0xe2, 0xd9, 0xaf, 0x43, 0x86, 0x11, 0x22, 0x44, 0x88, 0x0d, 0x1a, 0x34, 0x68, 0xd0, 0xbd, 0x67, 0xce, 0x81, 0x1f, 0x3e, 0x7c, 0xf8, 0xed, 0xc7, 0x93, 0x3b, 0x76, 0xec, 0xc5, 0x97, 0x33, 0x66, 0xcc, 0x85, 0x17, 0x2e, 0x5c, 0xb8, 0x6d, 0xda, 0xa9, 0x4f, 0x9e, 0x21, 0x42, 0x84, 0x15, 0x2a, 0x54, 0xa8, 0x4d, 0x9a, 0x29, 0x52, 0xa4, 0x55, 0xaa, 0x49, 0x92, 0x39, 0x72, 0xe4, 0xd5, 0xb7, 0x73, 0xe6, 0xd1, 0xbf, 0x63, 0xc6, 0x91, 0x3f, 0x7e, 0xfc, 0xe5, 0xd7, 0xb3, 0x7b, 0xf6, 0xf1, 0xff, 0xe3, 0xdb, 0xab, 0x4b, 0x96, 0x31, 0x62, 0xc4, 0x95, 0x37, 0x6e, 0xdc, 0xa5, 0x57, 0xae, 0x41, 0x82, 0x19, 0x32, 0x64, 0xc8, 0x8d, 0x07, 0x0e, 0x1c, 0x38, 0x70, 0xe0, 0xdd, 0xa7, 0x53, 0xa6, 0x51, 0xa2, 0x59, 0xb2, 0x79, 0xf2, 0xf9, 0xef, 0xc3, 0x9b, 0x2b, 0x56, 0xac, 0x45, 0x8a, 0x09, 0x12, 0x24, 0x48, 0x90, 0x3d, 0x7a, 0xf4, 0xf5, 0xf7, 0xf3, 0xfb, 0xeb, 0xcb, 0x8b, 0x0b, 0x16, 0x2c, 0x58, 0xb0, 0x7d, 0xfa, 0xe9, 0xcf, 0x83, 0x1b, 0x36, 0x6c, 0xd8, 0xad, 0x47, 0x8e, 0x00];
-		    }
-
-		    /**
-		     * Returns the Galois field log table.
-		     *
-		     * @return {number[]} The Galois field log table.
-		     * @public
-		     * @static
-		     */
-
-		  }, {
-		    key: "LOG",
-		    get: function get() {
-		      return [0xff, 0x00, 0x01, 0x19, 0x02, 0x32, 0x1a, 0xc6, 0x03, 0xdf, 0x33, 0xee, 0x1b, 0x68, 0xc7, 0x4b, 0x04, 0x64, 0xe0, 0x0e, 0x34, 0x8d, 0xef, 0x81, 0x1c, 0xc1, 0x69, 0xf8, 0xc8, 0x08, 0x4c, 0x71, 0x05, 0x8a, 0x65, 0x2f, 0xe1, 0x24, 0x0f, 0x21, 0x35, 0x93, 0x8e, 0xda, 0xf0, 0x12, 0x82, 0x45, 0x1d, 0xb5, 0xc2, 0x7d, 0x6a, 0x27, 0xf9, 0xb9, 0xc9, 0x9a, 0x09, 0x78, 0x4d, 0xe4, 0x72, 0xa6, 0x06, 0xbf, 0x8b, 0x62, 0x66, 0xdd, 0x30, 0xfd, 0xe2, 0x98, 0x25, 0xb3, 0x10, 0x91, 0x22, 0x88, 0x36, 0xd0, 0x94, 0xce, 0x8f, 0x96, 0xdb, 0xbd, 0xf1, 0xd2, 0x13, 0x5c, 0x83, 0x38, 0x46, 0x40, 0x1e, 0x42, 0xb6, 0xa3, 0xc3, 0x48, 0x7e, 0x6e, 0x6b, 0x3a, 0x28, 0x54, 0xfa, 0x85, 0xba, 0x3d, 0xca, 0x5e, 0x9b, 0x9f, 0x0a, 0x15, 0x79, 0x2b, 0x4e, 0xd4, 0xe5, 0xac, 0x73, 0xf3, 0xa7, 0x57, 0x07, 0x70, 0xc0, 0xf7, 0x8c, 0x80, 0x63, 0x0d, 0x67, 0x4a, 0xde, 0xed, 0x31, 0xc5, 0xfe, 0x18, 0xe3, 0xa5, 0x99, 0x77, 0x26, 0xb8, 0xb4, 0x7c, 0x11, 0x44, 0x92, 0xd9, 0x23, 0x20, 0x89, 0x2e, 0x37, 0x3f, 0xd1, 0x5b, 0x95, 0xbc, 0xcf, 0xcd, 0x90, 0x87, 0x97, 0xb2, 0xdc, 0xfc, 0xbe, 0x61, 0xf2, 0x56, 0xd3, 0xab, 0x14, 0x2a, 0x5d, 0x9e, 0x84, 0x3c, 0x39, 0x53, 0x47, 0x6d, 0x41, 0xa2, 0x1f, 0x2d, 0x43, 0xd8, 0xb7, 0x7b, 0xa4, 0x76, 0xc4, 0x17, 0x49, 0xec, 0x7f, 0x0c, 0x6f, 0xf6, 0x6c, 0xa1, 0x3b, 0x52, 0x29, 0x9d, 0x55, 0xaa, 0xfb, 0x60, 0x86, 0xb1, 0xbb, 0xcc, 0x3e, 0x5a, 0xcb, 0x59, 0x5f, 0xb0, 0x9c, 0xa9, 0xa0, 0x51, 0x0b, 0xf5, 0x16, 0xeb, 0x7a, 0x75, 0x2c, 0xd7, 0x4f, 0xae, 0xd5, 0xe9, 0xe6, 0xe7, 0xad, 0xe8, 0x74, 0xd6, 0xf4, 0xea, 0xa8, 0x50, 0x58, 0xaf];
-		    }
-		  }]);
-
-		  return Galois;
-		}();
-
-		/*
-		 * QRious
-		 * Copyright (C) 2016 Alasdair Mercer
-		 * Copyright (C) 2010 Tom Zerucha
-		 *
-		 * This program is free software: you can redistribute it and/or modify
-		 * it under the terms of the GNU General Public License as published by
-		 * the Free Software Foundation, either version 3 of the License, or
-		 * (at your option) any later version.
-		 *
-		 * This program is distributed in the hope that it will be useful,
-		 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-		 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-		 * GNU General Public License for more details.
-		 *
-		 * You should have received a copy of the GNU General Public License
-		 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-		 */
-
-		/**
-		 * Contains version pattern information.
-		 *
-		 * @public
-		 */
-		var Version = function () {
-		  function Version() {
-		    _classCallCheck(this, Version);
-		  }
-
-		  _createClass(Version, null, [{
-		    key: "BLOCK",
-
-
-		    /**
-		     * Returns the version pattern block.
-		     *
-		     * @return {number[]} The version pattern block.
-		     * @public
-		     * @static
-		     */
-		    get: function get() {
-		      return [0xc94, 0x5bc, 0xa99, 0x4d3, 0xbf6, 0x762, 0x847, 0x60d, 0x928, 0xb78, 0x45d, 0xa17, 0x532, 0x9a6, 0x683, 0x8c9, 0x7ec, 0xec4, 0x1e1, 0xfab, 0x08e, 0xc1a, 0x33f, 0xd75, 0x250, 0x9d5, 0x6f0, 0x8ba, 0x79f, 0xb0b, 0x42e, 0xa64, 0x541, 0xc69];
-		    }
-		  }]);
-
-		  return Version;
-		}();
-
-		/*
-		 * QRious
-		 * Copyright (C) 2016 Alasdair Mercer
-		 * Copyright (C) 2010 Tom Zerucha
-		 *
-		 * This program is free software: you can redistribute it and/or modify
-		 * it under the terms of the GNU General Public License as published by
-		 * the Free Software Foundation, either version 3 of the License, or
-		 * (at your option) any later version.
-		 *
-		 * This program is distributed in the hope that it will be useful,
-		 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-		 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-		 * GNU General Public License for more details.
-		 *
-		 * You should have received a copy of the GNU General Public License
-		 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-		 */
-
-		/**
-		 * Generates information for a QR code frame based on a specific value to be encoded.
-		 *
-		 * @public
-		 */
-
-		var Frame = function () {
-		  _createClass(Frame, null, [{
-		    key: '_createArray',
-		    value: function _createArray(length) {
-		      var array = [];
-
-		      for (var i = 0; i < length; i++) {
-		        array[i] = 0;
-		      }
-
-		      return array;
-		    }
-		  }, {
-		    key: '_getMaskBit',
-		    value: function _getMaskBit(x, y) {
-		      var bit = void 0;
-
-		      if (x > y) {
-		        bit = x;
-		        x = y;
-		        y = bit;
-		      }
-
-		      bit = y;
-		      bit += y * y;
-		      bit >>= 1;
-		      bit += x;
-
-		      return bit;
-		    }
-		  }, {
-		    key: '_modN',
-		    value: function _modN(x) {
-		      while (x >= 255) {
-		        x -= 255;
-		        x = (x >> 8) + (x & 255);
-		      }
-
-		      return x;
-		    }
-
-		    // *Badness* coefficients.
-
-		  }, {
-		    key: 'N1',
-		    get: function get() {
-		      return 3;
-		    }
-		  }, {
-		    key: 'N2',
-		    get: function get() {
-		      return 3;
-		    }
-		  }, {
-		    key: 'N3',
-		    get: function get() {
-		      return 40;
-		    }
-		  }, {
-		    key: 'N4',
-		    get: function get() {
-		      return 10;
-		    }
-
-		    /**
-		     * Creates an instance of {@link Frame} based on the <code>options</code> provided.
-		     *
-		     * @param {Frame~Options} options - the options to be used
-		     * @public
-		     */
-
-		  }]);
-
-		  function Frame(options) {
-		    _classCallCheck(this, Frame);
-
-		    this._badness = [];
-		    this._level = ErrorCorrection.LEVELS[options.level];
-		    this._polynomial = [];
-		    this._value = options.value;
-		    this._valueLength = this._value.length;
-		    this._version = 0;
-		    this._stringBuffer = [];
-
-		    var dataBlock = void 0;
-		    var eccBlock = void 0;
-		    var neccBlock1 = void 0;
-		    var neccBlock2 = void 0;
-
-		    while (this._version < 40) {
-		      this._version++;
-
-		      var index = (this._level - 1) * 4 + (this._version - 1) * 16;
-
-		      neccBlock1 = ErrorCorrection.BLOCKS[index++];
-		      neccBlock2 = ErrorCorrection.BLOCKS[index++];
-		      dataBlock = ErrorCorrection.BLOCKS[index++];
-		      eccBlock = ErrorCorrection.BLOCKS[index];
-
-		      index = dataBlock * (neccBlock1 + neccBlock2) + neccBlock2 - 3 + (this._version <= 9);
-
-		      if (this._valueLength <= index) {
-		        break;
-		      }
-		    }
-
-		    this._dataBlock = dataBlock;
-		    this._eccBlock = eccBlock;
-		    this._neccBlock1 = neccBlock1;
-		    this._neccBlock2 = neccBlock2;
-
-		    /**
-		     * The data width is based on version.
-		     *
-		     * @public
-		     * @type {number}
-		     */
-		    // FIXME: Ensure that it fits instead of being truncated.
-		    this.width = 17 + 4 * this._version;
-
-		    /**
-		     * The image buffer.
-		     *
-		     * @public
-		     * @type {number[]}
-		     */
-		    this.buffer = Frame._createArray(this.width * this.width);
-
-		    this._ecc = Frame._createArray(this._dataBlock + (this._dataBlock + this._eccBlock) * (this._neccBlock1 + this._neccBlock2) + this._neccBlock2);
-		    this._mask = Frame._createArray((this.width * (this.width + 1) + 1) / 2);
-
-		    this._insertFinders();
-		    this._insertAlignments();
-
-		    // Insert single foreground cell.
-		    this.buffer[8 + this.width * (this.width - 8)] = 1;
-
-		    this._insertTimingGap();
-		    this._reverseMask();
-		    this._insertTimingRowAndColumn();
-		    this._insertVersion();
-		    this._syncMask();
-		    this._convertBitStream(this._value.length);
-		    this._calculatePolynomial();
-		    this._appendEccToData();
-		    this._interleaveBlocks();
-		    this._pack();
-		    this._finish();
-		  }
-
-		  _createClass(Frame, [{
-		    key: '_addAlignment',
-		    value: function _addAlignment(x, y) {
-		      this.buffer[x + this.width * y] = 1;
-
-		      for (var i = -2; i < 2; i++) {
-		        this.buffer[x + i + this.width * (y - 2)] = 1;
-		        this.buffer[x - 2 + this.width * (y + i + 1)] = 1;
-		        this.buffer[x + 2 + this.width * (y + i)] = 1;
-		        this.buffer[x + i + 1 + this.width * (y + 2)] = 1;
-		      }
-
-		      for (var _i = 0; _i < 2; _i++) {
-		        this._setMask(x - 1, y + _i);
-		        this._setMask(x + 1, y - _i);
-		        this._setMask(x - _i, y - 1);
-		        this._setMask(x + _i, y + 1);
-		      }
-		    }
-		  }, {
-		    key: '_appendData',
-		    value: function _appendData(data, dataLength, ecc, eccLength) {
-		      for (var i = 0; i < eccLength; i++) {
-		        this._stringBuffer[ecc + i] = 0;
-		      }
-
-		      for (var _i2 = 0; _i2 < dataLength; _i2++) {
-		        var bit = Galois.LOG[this._stringBuffer[data + _i2] ^ this._stringBuffer[ecc]];
-
-		        if (bit !== 255) {
-		          for (var j = 1; j < eccLength; j++) {
-		            this._stringBuffer[ecc + j - 1] = this._stringBuffer[ecc + j] ^ Galois.EXPONENT[Frame._modN(bit + this._polynomial[eccLength - j])];
-		          }
-		        } else {
-		          for (var _j = ecc; _j < ecc + eccLength; _j++) {
-		            this._stringBuffer[_j] = this._stringBuffer[_j + 1];
-		          }
-		        }
-
-		        this._stringBuffer[ecc + eccLength - 1] = bit === 255 ? 0 : Galois.EXPONENT[Frame._modN(bit + this._polynomial[0])];
-		      }
-		    }
-		  }, {
-		    key: '_appendEccToData',
-		    value: function _appendEccToData() {
-		      var data = 0;
-		      var ecc = this._calculateMaxLength();
-
-		      for (var i = 0; i < this._neccBlock1; i++) {
-		        this._appendData(data, this._dataBlock, ecc, this._eccBlock);
-
-		        data += this._dataBlock;
-		        ecc += this._eccBlock;
-		      }
-
-		      for (var _i3 = 0; _i3 < this._neccBlock2; _i3++) {
-		        this._appendData(data, this._dataBlock + 1, ecc, this._eccBlock);
-
-		        data += this._dataBlock + 1;
-		        ecc += this._eccBlock;
-		      }
-		    }
-		  }, {
-		    key: '_applyMask',
-		    value: function _applyMask(mask) {
-		      var width = this.width;
-
-		      switch (mask) {
-		        case 0:
-		          for (var y = 0; y < width; y++) {
-		            for (var x = 0; x < width; x++) {
-		              if (!(x + y & 1) && !this._isMasked(x, y)) {
-		                this.buffer[x + y * width] ^= 1;
-		              }
-		            }
-		          }
-
-		          break;
-		        case 1:
-		          for (var _y = 0; _y < width; _y++) {
-		            for (var _x = 0; _x < width; _x++) {
-		              if (!(_y & 1) && !this._isMasked(_x, _y)) {
-		                this.buffer[_x + _y * width] ^= 1;
-		              }
-		            }
-		          }
-
-		          break;
-		        case 2:
-		          for (var _y2 = 0; _y2 < width; _y2++) {
-		            for (var r3x = 0, _x2 = 0; _x2 < width; _x2++, r3x++) {
-		              if (r3x === 3) {
-		                r3x = 0;
-		              }
-
-		              if (!r3x && !this._isMasked(_x2, _y2)) {
-		                this.buffer[_x2 + _y2 * width] ^= 1;
-		              }
-		            }
-		          }
-
-		          break;
-		        case 3:
-		          for (var r3y = 0, _y3 = 0; _y3 < width; _y3++, r3y++) {
-		            if (r3y === 3) {
-		              r3y = 0;
-		            }
-
-		            for (var _r3x = r3y, _x3 = 0; _x3 < width; _x3++, _r3x++) {
-		              if (_r3x === 3) {
-		                _r3x = 0;
-		              }
-
-		              if (!_r3x && !this._isMasked(_x3, _y3)) {
-		                this.buffer[_x3 + _y3 * width] ^= 1;
-		              }
-		            }
-		          }
-
-		          break;
-		        case 4:
-		          for (var _y4 = 0; _y4 < width; _y4++) {
-		            for (var _r3x2 = 0, _r3y = _y4 >> 1 & 1, _x4 = 0; _x4 < width; _x4++, _r3x2++) {
-		              if (_r3x2 === 3) {
-		                _r3x2 = 0;
-		                _r3y = !_r3y;
-		              }
-
-		              if (!_r3y && !this._isMasked(_x4, _y4)) {
-		                this.buffer[_x4 + _y4 * width] ^= 1;
-		              }
-		            }
-		          }
-
-		          break;
-		        case 5:
-		          for (var _r3y2 = 0, _y5 = 0; _y5 < width; _y5++, _r3y2++) {
-		            if (_r3y2 === 3) {
-		              _r3y2 = 0;
-		            }
-
-		            for (var _r3x3 = 0, _x5 = 0; _x5 < width; _x5++, _r3x3++) {
-		              if (_r3x3 === 3) {
-		                _r3x3 = 0;
-		              }
-
-		              if (!((_x5 & _y5 & 1) + !(!_r3x3 | !_r3y2)) && !this._isMasked(_x5, _y5)) {
-		                this.buffer[_x5 + _y5 * width] ^= 1;
-		              }
-		            }
-		          }
-
-		          break;
-		        case 6:
-		          for (var _r3y3 = 0, _y6 = 0; _y6 < width; _y6++, _r3y3++) {
-		            if (_r3y3 === 3) {
-		              _r3y3 = 0;
-		            }
-
-		            for (var _r3x4 = 0, _x6 = 0; _x6 < width; _x6++, _r3x4++) {
-		              if (_r3x4 === 3) {
-		                _r3x4 = 0;
-		              }
-
-		              if (!((_x6 & _y6 & 1) + (_r3x4 && _r3x4 === _r3y3) & 1) && !this._isMasked(_x6, _y6)) {
-		                this.buffer[_x6 + _y6 * width] ^= 1;
-		              }
-		            }
-		          }
-
-		          break;
-		        case 7:
-		          for (var _r3y4 = 0, _y7 = 0; _y7 < width; _y7++, _r3y4++) {
-		            if (_r3y4 === 3) {
-		              _r3y4 = 0;
-		            }
-
-		            for (var _r3x5 = 0, _x7 = 0; _x7 < width; _x7++, _r3x5++) {
-		              if (_r3x5 === 3) {
-		                _r3x5 = 0;
-		              }
-
-		              if (!((_r3x5 && _r3x5 === _r3y4) + (_x7 + _y7 & 1) & 1) && !this._isMasked(_x7, _y7)) {
-		                this.buffer[_x7 + _y7 * width] ^= 1;
-		              }
-		            }
-		          }
-
-		          break;
-		      }
-		    }
-		  }, {
-		    key: '_calculateMaxLength',
-		    value: function _calculateMaxLength() {
-		      return this._dataBlock * (this._neccBlock1 + this._neccBlock2) + this._neccBlock2;
-		    }
-		  }, {
-		    key: '_calculatePolynomial',
-		    value: function _calculatePolynomial() {
-		      this._polynomial[0] = 1;
-
-		      for (var i = 0; i < this._eccBlock; i++) {
-		        this._polynomial[i + 1] = 1;
-
-		        for (var j = i; j > 0; j--) {
-		          this._polynomial[j] = this._polynomial[j] ? this._polynomial[j - 1] ^ Galois.EXPONENT[Frame._modN(Galois.LOG[this._polynomial[j]] + i)] : this._polynomial[j - 1];
-		        }
-
-		        this._polynomial[0] = Galois.EXPONENT[Frame._modN(Galois.LOG[this._polynomial[0]] + i)];
-		      }
-
-		      // Use logs for generator polynomial to save calculation step.
-		      for (var _i4 = 0; _i4 <= this._eccBlock; _i4++) {
-		        this._polynomial[_i4] = Galois.LOG[this._polynomial[_i4]];
-		      }
-		    }
-		  }, {
-		    key: '_checkBadness',
-		    value: function _checkBadness() {
-		      var bad = 0;
-		      var width = this.width;
-
-		      // Blocks of same colour.
-		      for (var y = 0; y < width - 1; y++) {
-		        for (var x = 0; x < width - 1; x++) {
-		          // All foreground colour.
-		          if (this.buffer[x + width * y] && this.buffer[x + 1 + width * y] && this.buffer[x + width * (y + 1)] && this.buffer[x + 1 + width * (y + 1)] ||
-		          // All background colour.
-		          !(this.buffer[x + width * y] || this.buffer[x + 1 + width * y] || this.buffer[x + width * (y + 1)] || this.buffer[x + 1 + width * (y + 1)])) {
-		            bad += Frame.N2;
-		          }
-		        }
-		      }
-
-		      var bw = 0;
-
-		      // X runs.
-		      for (var _y8 = 0; _y8 < width; _y8++) {
-		        var h = 0;
-
-		        this._badness[0] = 0;
-
-		        for (var b = 0, _x8 = 0; _x8 < width; _x8++) {
-		          var b1 = this.buffer[_x8 + width * _y8];
-
-		          if (b === b1) {
-		            this._badness[h]++;
-		          } else {
-		            this._badness[++h] = 1;
-		          }
-
-		          b = b1;
-		          bw += b ? 1 : -1;
-		        }
-
-		        bad += this._getBadness(h);
-		      }
-
-		      if (bw < 0) {
-		        bw = -bw;
-		      }
-
-		      var count = 0;
-		      var big = bw;
-		      big += big << 2;
-		      big <<= 1;
-
-		      while (big > width * width) {
-		        big -= width * width;
-		        count++;
-		      }
-
-		      bad += count * Frame.N4;
-
-		      // Y runs.
-		      for (var _x9 = 0; _x9 < width; _x9++) {
-		        var _h = 0;
-
-		        this._badness[0] = 0;
-
-		        for (var _b = 0, _y9 = 0; _y9 < width; _y9++) {
-		          var _b2 = this.buffer[_x9 + width * _y9];
-
-		          if (_b === _b2) {
-		            this._badness[_h]++;
-		          } else {
-		            this._badness[++_h] = 1;
-		          }
-
-		          _b = _b2;
-		        }
-
-		        bad += this._getBadness(_h);
-		      }
-
-		      return bad;
-		    }
-		  }, {
-		    key: '_convertBitStream',
-		    value: function _convertBitStream(length) {
-		      // Convert string to bit stream. 8-bit data to QR-coded 8-bit data (numeric, alphanumeric, or kanji not supported).
-		      for (var i = 0; i < length; i++) {
-		        this._ecc[i] = this._value.charCodeAt(i);
-		      }
-
-		      this._stringBuffer = this._ecc.slice(0);
-
-		      var maxLength = this._calculateMaxLength();
-
-		      if (length >= maxLength - 2) {
-		        length = maxLength - 2;
-
-		        if (this._version > 9) {
-		          length--;
-		        }
-		      }
-
-		      // Shift and re-pack to insert length prefix.
-		      var index = length;
-
-		      if (this._version > 9) {
-		        this._stringBuffer[index + 2] = 0;
-		        this._stringBuffer[index + 3] = 0;
-
-		        while (index--) {
-		          var bit = this._stringBuffer[index];
-
-		          this._stringBuffer[index + 3] |= 255 & bit << 4;
-		          this._stringBuffer[index + 2] = bit >> 4;
-		        }
-
-		        this._stringBuffer[2] |= 255 & length << 4;
-		        this._stringBuffer[1] = length >> 4;
-		        this._stringBuffer[0] = 0x40 | length >> 12;
-		      } else {
-		        this._stringBuffer[index + 1] = 0;
-		        this._stringBuffer[index + 2] = 0;
-
-		        while (index--) {
-		          var _bit = this._stringBuffer[index];
-
-		          this._stringBuffer[index + 2] |= 255 & _bit << 4;
-		          this._stringBuffer[index + 1] = _bit >> 4;
-		        }
-
-		        this._stringBuffer[1] |= 255 & length << 4;
-		        this._stringBuffer[0] = 0x40 | length >> 4;
-		      }
-
-		      // Fill to end with pad pattern.
-		      index = length + 3 - (this._version < 10);
-
-		      while (index < maxLength) {
-		        this._stringBuffer[index++] = 0xec;
-		        this._stringBuffer[index++] = 0x11;
-		      }
-		    }
-		  }, {
-		    key: '_getBadness',
-		    value: function _getBadness(length) {
-		      var badRuns = 0;
-
-		      for (var i = 0; i <= length; i++) {
-		        if (this._badness[i] >= 5) {
-		          badRuns += Frame.N1 + this._badness[i] - 5;
-		        }
-		      }
-
-		      // FBFFFBF as in finder.
-		      for (var _i5 = 3; _i5 < length - 1; _i5 += 2) {
-		        if (this._badness[_i5 - 2] === this._badness[_i5 + 2] && this._badness[_i5 + 2] === this._badness[_i5 - 1] && this._badness[_i5 - 1] === this._badness[_i5 + 1] && this._badness[_i5 - 1] * 3 === this._badness[_i5] && (
-		        // Background around the foreground pattern? Not part of the specs.
-		        this._badness[_i5 - 3] === 0 || _i5 + 3 > length || this._badness[_i5 - 3] * 3 >= this._badness[_i5] * 4 || this._badness[_i5 + 3] * 3 >= this._badness[_i5] * 4)) {
-		          badRuns += Frame.N3;
-		        }
-		      }
-
-		      return badRuns;
-		    }
-		  }, {
-		    key: '_finish',
-		    value: function _finish() {
-		      // Save pre-mask copy of frame.
-		      this._stringBuffer = this.buffer.slice(0);
-
-		      var bit = 0;
-		      var i = void 0;
-		      var mask = 30000;
-
-		      /*
-		       * Using for instead of while since in original Arduino code if an early mask was "good enough" it wouldn't try for
-		       * a better one since they get more complex and take longer.
-		       */
-		      for (i = 0; i < 8; i++) {
-		        // Returns foreground-background imbalance.
-		        this._applyMask(i);
-
-		        var currentMask = this._checkBadness();
-
-		        // Is current mask better than previous best?
-		        if (currentMask < mask) {
-		          mask = currentMask;
-		          bit = i;
-		        }
-
-		        // Don't increment "i" to a void redoing mask.
-		        if (bit === 7) {
-		          break;
-		        }
-
-		        // Reset for next pass.
-		        this.buffer = this._stringBuffer.slice(0);
-		      }
-
-		      // Redo best mask as none were "good enough" (i.e. last wasn't bit).
-		      if (bit !== i) {
-		        this._applyMask(bit);
-		      }
-
-		      // Add in final mask/ECC level bytes.
-		      mask = ErrorCorrection.FINAL_FORMAT[bit + (this._level - 1 << 3)];
-
-		      // Low byte.
-		      for (i = 0; i < 8; i++, mask >>= 1) {
-		        if (mask & 1) {
-		          this.buffer[this.width - 1 - i + this.width * 8] = 1;
-
-		          if (i < 6) {
-		            this.buffer[8 + this.width * i] = 1;
-		          } else {
-		            this.buffer[8 + this.width * (i + 1)] = 1;
-		          }
-		        }
-		      }
-
-		      // High byte.
-		      for (i = 0; i < 7; i++, mask >>= 1) {
-		        if (mask & 1) {
-		          this.buffer[8 + this.width * (this.width - 7 + i)] = 1;
-
-		          if (i) {
-		            this.buffer[6 - i + this.width * 8] = 1;
-		          } else {
-		            this.buffer[7 + this.width * 8] = 1;
-		          }
-		        }
-		      }
-		    }
-		  }, {
-		    key: '_interleaveBlocks',
-		    value: function _interleaveBlocks() {
-		      var maxLength = this._calculateMaxLength();
-		      var i = void 0;
-		      var k = 0;
-
-		      for (i = 0; i < this._dataBlock; i++) {
-		        for (var j = 0; j < this._neccBlock1; j++) {
-		          this._ecc[k++] = this._stringBuffer[i + j * this._dataBlock];
-		        }
-
-		        for (var _j2 = 0; _j2 < this._neccBlock2; _j2++) {
-		          this._ecc[k++] = this._stringBuffer[this._neccBlock1 * this._dataBlock + i + _j2 * (this._dataBlock + 1)];
-		        }
-		      }
-
-		      for (var _j3 = 0; _j3 < this._neccBlock2; _j3++) {
-		        this._ecc[k++] = this._stringBuffer[this._neccBlock1 * this._dataBlock + i + _j3 * (this._dataBlock + 1)];
-		      }
-
-		      for (i = 0; i < this._eccBlock; i++) {
-		        for (var _j4 = 0; _j4 < this._neccBlock1 + this._neccBlock2; _j4++) {
-		          this._ecc[k++] = this._stringBuffer[maxLength + i + _j4 * this._eccBlock];
-		        }
-		      }
-
-		      this._stringBuffer = this._ecc;
-		    }
-		  }, {
-		    key: '_insertAlignments',
-		    value: function _insertAlignments() {
-		      var width = this.width;
-
-		      if (this._version > 1) {
-		        var i = Alignment.BLOCK[this._version];
-		        var y = width - 7;
-
-		        for (;;) {
-		          var x = width - 7;
-
-		          while (x > i - 3) {
-		            this._addAlignment(x, y);
-
-		            if (x < i) {
-		              break;
-		            }
-
-		            x -= i;
-		          }
-
-		          if (y <= i + 9) {
-		            break;
-		          }
-
-		          y -= i;
-
-		          this._addAlignment(6, y);
-		          this._addAlignment(y, 6);
-		        }
-		      }
-		    }
-		  }, {
-		    key: '_insertFinders',
-		    value: function _insertFinders() {
-		      var width = this.width;
-
-		      for (var i = 0; i < 3; i++) {
-		        var j = 0;
-		        var y = 0;
-
-		        if (i === 1) {
-		          j = width - 7;
-		        }
-		        if (i === 2) {
-		          y = width - 7;
-		        }
-
-		        this.buffer[y + 3 + width * (j + 3)] = 1;
-
-		        for (var x = 0; x < 6; x++) {
-		          this.buffer[y + x + width * j] = 1;
-		          this.buffer[y + width * (j + x + 1)] = 1;
-		          this.buffer[y + 6 + width * (j + x)] = 1;
-		          this.buffer[y + x + 1 + width * (j + 6)] = 1;
-		        }
-
-		        for (var _x10 = 1; _x10 < 5; _x10++) {
-		          this._setMask(y + _x10, j + 1);
-		          this._setMask(y + 1, j + _x10 + 1);
-		          this._setMask(y + 5, j + _x10);
-		          this._setMask(y + _x10 + 1, j + 5);
-		        }
-
-		        for (var _x11 = 2; _x11 < 4; _x11++) {
-		          this.buffer[y + _x11 + width * (j + 2)] = 1;
-		          this.buffer[y + 2 + width * (j + _x11 + 1)] = 1;
-		          this.buffer[y + 4 + width * (j + _x11)] = 1;
-		          this.buffer[y + _x11 + 1 + width * (j + 4)] = 1;
-		        }
-		      }
-		    }
-		  }, {
-		    key: '_insertTimingGap',
-		    value: function _insertTimingGap() {
-		      var width = this.width;
-
-		      for (var y = 0; y < 7; y++) {
-		        this._setMask(7, y);
-		        this._setMask(width - 8, y);
-		        this._setMask(7, y + width - 7);
-		      }
-
-		      for (var x = 0; x < 8; x++) {
-		        this._setMask(x, 7);
-		        this._setMask(x + width - 8, 7);
-		        this._setMask(x, width - 8);
-		      }
-		    }
-		  }, {
-		    key: '_insertTimingRowAndColumn',
-		    value: function _insertTimingRowAndColumn() {
-		      var width = this.width;
-
-		      for (var x = 0; x < width - 14; x++) {
-		        if (x & 1) {
-		          this._setMask(8 + x, 6);
-		          this._setMask(6, 8 + x);
-		        } else {
-		          this.buffer[8 + x + width * 6] = 1;
-		          this.buffer[6 + width * (8 + x)] = 1;
-		        }
-		      }
-		    }
-		  }, {
-		    key: '_insertVersion',
-		    value: function _insertVersion() {
-		      var width = this.width;
-
-		      if (this._version > 6) {
-		        var i = Version.BLOCK[this._version - 7];
-		        var j = 17;
-
-		        for (var x = 0; x < 6; x++) {
-		          for (var y = 0; y < 3; y++, j--) {
-		            if (1 & (j > 11 ? this._version >> j - 12 : i >> j)) {
-		              this.buffer[5 - x + width * (2 - y + width - 11)] = 1;
-		              this.buffer[2 - y + width - 11 + width * (5 - x)] = 1;
-		            } else {
-		              this._setMask(5 - x, 2 - y + width - 11);
-		              this._setMask(2 - y + width - 11, 5 - x);
-		            }
-		          }
-		        }
-		      }
-		    }
-		  }, {
-		    key: '_isMasked',
-		    value: function _isMasked(x, y) {
-		      var bit = Frame._getMaskBit(x, y);
-
-		      return this._mask[bit] === 1;
-		    }
-		  }, {
-		    key: '_pack',
-		    value: function _pack() {
-		      var x = this.width - 1;
-		      var y = this.width - 1;
-		      var k = 1;
-		      var v = 1;
-
-		      // Interleaved data and ECC codes.
-		      var length = (this._dataBlock + this._eccBlock) * (this._neccBlock1 + this._neccBlock2) + this._neccBlock2;
-
-		      for (var i = 0; i < length; i++) {
-		        var bit = this._stringBuffer[i];
-
-		        for (var j = 0; j < 8; j++, bit <<= 1) {
-		          if (0x80 & bit) {
-		            this.buffer[x + this.width * y] = 1;
-		          }
-
-		          // Find next fill position.
-		          do {
-		            if (v) {
-		              x--;
-		            } else {
-		              x++;
-
-		              if (k) {
-		                if (y !== 0) {
-		                  y--;
-		                } else {
-		                  x -= 2;
-		                  k = !k;
-
-		                  if (x === 6) {
-		                    x--;
-		                    y = 9;
-		                  }
-		                }
-		              } else if (y !== this.width - 1) {
-		                y++;
-		              } else {
-		                x -= 2;
-		                k = !k;
-
-		                if (x === 6) {
-		                  x--;
-		                  y -= 8;
-		                }
-		              }
-		            }
-
-		            v = !v;
-		          } while (this._isMasked(x, y));
-		        }
-		      }
-		    }
-		  }, {
-		    key: '_reverseMask',
-		    value: function _reverseMask() {
-		      var width = this.width;
-
-		      for (var x = 0; x < 9; x++) {
-		        this._setMask(x, 8);
-		      }
-
-		      for (var _x12 = 0; _x12 < 8; _x12++) {
-		        this._setMask(_x12 + width - 8, 8);
-		        this._setMask(8, _x12);
-		      }
-
-		      for (var y = 0; y < 7; y++) {
-		        this._setMask(8, y + width - 7);
-		      }
-		    }
-		  }, {
-		    key: '_setMask',
-		    value: function _setMask(x, y) {
-		      var bit = Frame._getMaskBit(x, y);
-
-		      this._mask[bit] = 1;
-		    }
-		  }, {
-		    key: '_syncMask',
-		    value: function _syncMask() {
-		      var width = this.width;
-
-		      for (var y = 0; y < width; y++) {
-		        for (var x = 0; x <= y; x++) {
-		          if (this.buffer[x + width * y]) {
-		            this._setMask(x, y);
-		          }
-		        }
-		      }
-		    }
-		  }]);
-
-		  return Frame;
-		}();
-
-
-
-		/**
-		 * The options used by {@link Frame}.
-		 *
-		 * @typedef {Object} Frame~Options
-		 * @property {string} level - The ECC level to be used.
-		 * @property {string} value - The value to be encoded.
-		 */
-
-		/*
-		 * QRious
-		 * Copyright (C) 2016 Alasdair Mercer
-		 * Copyright (C) 2010 Tom Zerucha
-		 *
-		 * This program is free software: you can redistribute it and/or modify
-		 * it under the terms of the GNU General Public License as published by
-		 * the Free Software Foundation, either version 3 of the License, or
-		 * (at your option) any later version.
-		 *
-		 * This program is distributed in the hope that it will be useful,
-		 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-		 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-		 * GNU General Public License for more details.
-		 *
-		 * You should have received a copy of the GNU General Public License
-		 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-		 */
-
-		/**
-		 * An implementation of {@link Renderer} for working with <code>img</code> elements.
-		 *
-		 * This depends on {@link CanvasRenderer} being executed first as this implementation simply applies the data URL from
-		 * the rendered <code>canvas</code> element as the <code>src</code> for the <code>img</code> element being rendered.
-		 *
-		 * @public
-		 * @extends Renderer
-		 */
-
-		var ImageRenderer = function (_Renderer) {
-		  _inherits(ImageRenderer, _Renderer);
-
-		  function ImageRenderer() {
-		    _classCallCheck(this, ImageRenderer);
-
-		    return _possibleConstructorReturn(this, (ImageRenderer.__proto__ || _Object$getPrototypeOf(ImageRenderer)).apply(this, arguments));
-		  }
-
-		  _createClass(ImageRenderer, [{
-		    key: 'draw',
-
-
-		    /**
-		     * @override
-		     */
-		    value: function draw() {
-		      var qrious = this.qrious;
-
-		      qrious.image.src = qrious.toDataURL();
-		    }
-
-		    /**
-		     * @override
-		     */
-
-		  }, {
-		    key: 'reset',
-		    value: function reset() {
-		      var qrious = this.qrious;
-
-		      qrious.image.src = '';
-		    }
-
-		    /**
-		     * @override
-		     */
-
-		  }, {
-		    key: 'resize',
-		    value: function resize() {
-		      var qrious = this.qrious;
-		      var image = qrious.image;
-
-		      image.width = qrious.size;
-		      image.height = qrious.size;
-		    }
-		  }]);
-
-		  return ImageRenderer;
-		}(Renderer);
-
-		/*
-		 * QRious
-		 * Copyright (C) 2016 Alasdair Mercer
-		 * Copyright (C) 2010 Tom Zerucha
-		 *
-		 * This program is free software: you can redistribute it and/or modify
-		 * it under the terms of the GNU General Public License as published by
-		 * the Free Software Foundation, either version 3 of the License, or
-		 * (at your option) any later version.
-		 *
-		 * This program is distributed in the hope that it will be useful,
-		 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-		 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-		 * GNU General Public License for more details.
-		 *
-		 * You should have received a copy of the GNU General Public License
-		 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-		 */
-
-		/**
-		 * A basic manager for {@link Service} implementations that are mapped to simple names.
-		 *
-		 * @public
-		 */
-		var ServiceManager = function () {
-
-		  /**
-		   * Creates a new instance of {@link ServiceManager}.
-		   *
-		   * @public
-		   */
-		  function ServiceManager() {
-		    _classCallCheck(this, ServiceManager);
-
-		    this._services = {};
-		  }
-
-		  /**
-		   * Returns the {@link Service} being managed with the specified <code>name</code>.
-		   *
-		   * @param {string} name - the name of the {@link Service} to be returned
-		   * @return {Service} The {@link Service} is being managed with <code>name</code>.
-		   * @throws {Error} If no {@link Service} is being managed with <code>name</code>.
-		   * @public
-		   */
-
-
-		  _createClass(ServiceManager, [{
-		    key: "getService",
-		    value: function getService(name) {
-		      var service = this._services[name];
-		      if (!service) {
-		        throw new Error("Service is not being managed with name: " + name);
-		      }
-
-		      return service;
-		    }
-
-		    /**
-		     * Sets the {@link Service} implementation to be managed for the specified <code>name</code> to the
-		     * <code>service</code> provided.
-		     *
-		     * @param {string} name - the name of the {@link Service} to be managed with <code>name</code>
-		     * @param {Service} service - the {@link Service} implementation to be managed
-		     * @return {void}
-		     * @throws {Error} If a {@link Service} is already being managed with the same <code>name</code>.
-		     * @public
-		     */
-
-		  }, {
-		    key: "setService",
-		    value: function setService(name, service) {
-		      if (this._services[name]) {
-		        throw new Error("Service is already managed with name: " + name);
-		      }
-
-		      if (service) {
-		        this._services[name] = service;
-		      }
-		    }
-		  }]);
-
-		  return ServiceManager;
-		}();
-
-		/*
-		 * QRious
-		 * Copyright (C) 2016 Alasdair Mercer
-		 * Copyright (C) 2010 Tom Zerucha
-		 *
-		 * This program is free software: you can redistribute it and/or modify
-		 * it under the terms of the GNU General Public License as published by
-		 * the Free Software Foundation, either version 3 of the License, or
-		 * (at your option) any later version.
-		 *
-		 * This program is distributed in the hope that it will be useful,
-		 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-		 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-		 * GNU General Public License for more details.
-		 *
-		 * You should have received a copy of the GNU General Public License
-		 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-		 */
-
-		/**
-		 * Enables configuration of a QR code generator which uses HTML5 <code>canvas</code> for rendering.
-		 *
-		 * @public
-		 */
-
-		var QRious$1 = function () {
-		  _createClass(QRious, null, [{
-		    key: 'use',
-
-
-		    /**
-		     * Configures the <code>service</code> provided to be used by all {@link QRious} instances.
-		     *
-		     * @param {Service} service - the {@link Service} to be configured
-		     * @return {void}
-		     * @throws {Error} If a {@link Service} has already been configured with the same name.
-		     * @public
-		     * @static
-		     */
-		    value: function use(service) {
-		      QRious._serviceManager.setService(service.getName(), service);
-		    }
-		  }, {
-		    key: '_parseOptions',
-		    value: function _parseOptions(options) {
-		      options = _Object$assign({}, QRious.DEFAULTS, options);
-		      options.backgroundAlpha = Utilities.abs(options.backgroundAlpha);
-		      options.foregroundAlpha = Utilities.abs(options.foregroundAlpha);
-		      options.level = Utilities.toUpperCase(options.level);
-		      options.padding = Utilities.abs(options.padding);
-		      options.size = Utilities.abs(options.size);
-
-		      return options;
-		    }
-
-		    /**
-		     * Creates a new instance of {@link QRious} based on the <code>options</code> provided.
-		     *
-		     * @param {QRious~Options} [options] - the options to be used
-		     * @public
-		     */
-
-		  }, {
-		    key: 'DEFAULTS',
-
-
-		    /**
-		     * Returns the default options for {@link QRious}.
-		     *
-		     * @return {QRious~Options} The default options.
-		     * @public
-		     * @static
-		     */
-		    get: function get() {
-		      return {
-		        background: 'white',
-		        backgroundAlpha: 1,
-		        foreground: 'black',
-		        foregroundAlpha: 1,
-		        level: 'L',
-		        mime: 'image/png',
-		        padding: null,
-		        size: 100,
-		        value: ''
-		      };
-		    }
-
-		    /**
-		     * Returns the current version of {@link QRious}.
-		     *
-		     * @return {string} The current version.
-		     * @public
-		     * @static
-		     */
-
-		  }, {
-		    key: 'VERSION',
-		    get: function get() {
-		      return '2.2.0';
-		    }
-		  }]);
-
-		  function QRious(options) {
-		    _classCallCheck(this, QRious);
-
-		    options = QRious._parseOptions(options);
-
-		    Utilities.privatize(this, options);
-
-		    var element = this._element;
-		    var elementService = QRious._serviceManager.getService('element');
-
-		    /**
-		     * The <code>canvas</code> being used to render the QR code for this {@link QRious}.
-		     *
-		     * @public
-		     * @type {*}
-		     */
-		    this.canvas = element && elementService.isCanvas(element) ? element : elementService.createCanvas();
-		    this.canvas.qrious = this;
-
-		    /**
-		     * The <code>img</code> to contain the rendered QR code for this {@link QRious}.
-		     *
-		     * @public
-		     * @type {*}
-		     */
-		    this.image = element && elementService.isImage(element) ? element : elementService.createImage();
-		    this.image.qrious = this;
-
-		    this._renderers = [new CanvasRenderer(this), new ImageRenderer(this)];
-
-		    this.update();
-		  }
-
-		  /**
-		   * Returns the image data URI for the generated QR code using the <code>mime</code> provided.
-		   *
-		   * @param {string} [mime] - the MIME type for the image
-		   * @return {string} The image data URI for the QR code.
-		   * @public
-		   */
-
-
-		  _createClass(QRious, [{
-		    key: 'toDataURL',
-		    value: function toDataURL(mime) {
-		      return this.canvas.toDataURL(mime || this.mime);
-		    }
-
-		    /**
-		     * Updates this {@link QRious} by generating a new {@link Frame} and re-rendering the QR code.
-		     *
-		     * @return {void}
-		     * @protected
-		     */
-
-		  }, {
-		    key: 'update',
-		    value: function update() {
-		      var frame = new Frame({
-		        level: this.level,
-		        value: this.value
-		      });
-
-		      this._renderers.forEach(function (renderer) {
-		        return renderer.render(frame);
-		      });
-		    }
-
-		    /**
-		     * Returns the background color for the QR code.
-		     *
-		     * @return {string} The background color.
-		     * @public
-		     */
-
-		  }, {
-		    key: 'background',
-		    get: function get() {
-		      return this._background;
-		    }
-
-		    /**
-		     * Sets the background color for the QR code to <code>background</code>.
-		     *
-		     * @param {string} [background="white"] - the background color to be set
-		     * @public
-		     */
-		    ,
-		    set: function set(background) {
-		      var changed = Utilities.setter(this, '_background', background, QRious.DEFAULTS.background);
-
-		      if (changed) {
-		        this.update();
-		      }
-		    }
-
-		    /**
-		     * Returns the background alpha for the QR code.
-		     *
-		     * @return {number} The background alpha.
-		     * @public
-		     */
-
-		  }, {
-		    key: 'backgroundAlpha',
-		    get: function get() {
-		      return this._backgroundAlpha;
-		    }
-
-		    /**
-		     * Sets the background alpha for the QR code to <code>backgroundAlpha</code>.
-		     *
-		     * @param {number} [backgroundAlpha=1] - the background alpha to be set
-		     * @public
-		     */
-		    ,
-		    set: function set(backgroundAlpha) {
-		      var changed = Utilities.setter(this, '_backgroundAlpha', backgroundAlpha, QRious.DEFAULTS.backgroundAlpha);
-
-		      if (changed) {
-		        this.update();
-		      }
-		    }
-
-		    /**
-		     * Returns the foreground color for the QR code.
-		     *
-		     * @return {string} The foreground color.
-		     * @public
-		     */
-
-		  }, {
-		    key: 'foreground',
-		    get: function get() {
-		      return this._foreground;
-		    }
-
-		    /**
-		     * Sets the foreground color for the QR code to <code>foreground</code>.
-		     *
-		     * @param {string} [foreground="black"] - the foreground color to be set
-		     * @public
-		     */
-		    ,
-		    set: function set(foreground) {
-		      var changed = Utilities.setter(this, '_foreground', foreground, QRious.DEFAULTS.foreground);
-
-		      if (changed) {
-		        this.update();
-		      }
-		    }
-
-		    /**
-		     * Returns the foreground alpha for the QR code.
-		     *
-		     * @return {number} The foreground alpha.
-		     * @public
-		     */
-
-		  }, {
-		    key: 'foregroundAlpha',
-		    get: function get() {
-		      return this._foregroundAlpha;
-		    }
-
-		    /**
-		     * Sets the foreground alpha for the QR code to <code>foregroundAlpha</code>.
-		     *
-		     * @param {number} [foregroundAlpha=1] - the foreground alpha to be set
-		     * @public
-		     */
-		    ,
-		    set: function set(foregroundAlpha) {
-		      var changed = Utilities.setter(this, '_foregroundAlpha', foregroundAlpha, QRious.DEFAULTS.foregroundAlpha);
-
-		      if (changed) {
-		        this.update();
-		      }
-		    }
-
-		    /**
-		     * Returns the error correction level for the QR code.
-		     *
-		     * @return {string} The ECC level.
-		     * @public
-		     */
-
-		  }, {
-		    key: 'level',
-		    get: function get() {
-		      return this._level;
-		    }
-
-		    /**
-		     * Sets the error correction level for the QR code to <code>level</code>.
-		     *
-		     * <code>level</code> will be transformed to upper case to aid mapping to known ECC level blocks.
-		     *
-		     * @param {string} [level="L"] - the ECC level to be set
-		     * @public
-		     */
-		    ,
-		    set: function set(level) {
-		      var changed = Utilities.setter(this, '_level', level, QRious.DEFAULTS.level, Utilities.toUpperCase);
-
-		      if (changed) {
-		        this.update();
-		      }
-		    }
-
-		    /**
-		     * Returns the MIME type for the image rendered for the QR code.
-		     *
-		     * @return {string} The image MIME type.
-		     * @public
-		     */
-
-		  }, {
-		    key: 'mime',
-		    get: function get() {
-		      return this._mime;
-		    }
-
-		    /**
-		     * Sets the MIME type for the image rendered for the QR code to <code>mime</code>.
-		     *
-		     * @param {string} [mime="image/png"] - the image MIME type to be set
-		     * @public
-		     */
-		    ,
-		    set: function set(mime) {
-		      var changed = Utilities.setter(this, '_mime', mime, QRious.DEFAULTS.mime);
-
-		      if (changed) {
-		        this.update();
-		      }
-		    }
-
-		    /**
-		     * Returns the padding for the QR code.
-		     *
-		     * @return {number} The padding in pixels.
-		     * @public
-		     */
-
-		  }, {
-		    key: 'padding',
-		    get: function get() {
-		      return this._padding;
-		    }
-
-		    /**
-		     * Sets the padding for the QR code to <code>padding</code>.
-		     *
-		     * <code>padding</code> will be transformed to ensure that it is always an absolute positive numbers (e.g.
-		     * <code>-10</code> would become <code>10</code>).
-		     *
-		     * @param {number} [padding] - the padding in pixels to be set
-		     * @public
-		     */
-		    ,
-		    set: function set(padding) {
-		      var changed = Utilities.setter(this, '_padding', padding, QRious.DEFAULTS.padding, Utilities.abs);
-
-		      if (changed) {
-		        this.update();
-		      }
-		    }
-
-		    /**
-		     * Returns the size of the QR code.
-		     *
-		     * @return {number} The size in pixels.
-		     * @public
-		     */
-
-		  }, {
-		    key: 'size',
-		    get: function get() {
-		      return this._size;
-		    }
-
-		    /**
-		     * Sets the size of the QR code to <code>size</code>.
-		     *
-		     * <code>size</code> will be transformed to ensure that it is always an absolute positive numbers (e.g.
-		     * <code>-100</code> would become <code>100</code>).
-		     *
-		     * @param {number} [size=100] - the size in pixels to be set
-		     * @public
-		     */
-		    ,
-		    set: function set(size) {
-		      var changed = Utilities.setter(this, '_size', size, QRious.DEFAULTS.size, Utilities.abs);
-
-		      if (changed) {
-		        this.update();
-		      }
-		    }
-
-		    /**
-		     * Returns the value of the QR code.
-		     *
-		     * @return {string} The value.
-		     * @public
-		     */
-
-		  }, {
-		    key: 'value',
-		    get: function get() {
-		      return this._value;
-		    }
-
-		    /**
-		     * Sets the value of the QR code to <code>value</code>.
-		     *
-		     * @param {string} [value=""] - the value to be set
-		     * @public
-		     */
-		    ,
-		    set: function set(value) {
-		      var changed = Utilities.setter(this, '_value', value, QRious.DEFAULTS.value);
-
-		      if (changed) {
-		        this.update();
-		      }
-		    }
-		  }]);
-
-		  return QRious;
-		}();
-
-		QRious$1._serviceManager = new ServiceManager();
-
-
-
-		/**
-		 * The options used by {@link QRious}.
-		 *
-		 * @typedef {Object} QRious~Options
-		 * @property {string} [background="white"] - The background color to be applied to the QR code.
-		 * @property {number} [backgroundAlpha=1] - The background alpha to be applied to the QR code.
-		 * @property {*} [element] - The element to be used to render the QR code which may either be an <code>canvas</code> or
-		 * <code>img</code>. The element(s) will be created if needed.
-		 * @property {string} [foreground="black"] - The foreground color to be applied to the QR code.
-		 * @property {number} [foregroundAlpha=1] - The foreground alpha to be applied to the QR code.
-		 * @property {string} [level="L"] - The error correction level to be applied to the QR code.
-		 * @property {string} [mime="image/png"] - The MIME type to be used to render the image for the QR code.
-		 * @property {number} [padding] - The padding for the QR code in pixels.
-		 * @property {number} [size=100] - The size of the QR code in pixels.
-		 * @property {string} [value=""] - The value to be encoded within the QR code.
-		 */
-
-		/*
-		 * QRious
-		 * Copyright (C) 2016 Alasdair Mercer
-		 * Copyright (C) 2010 Tom Zerucha
-		 *
-		 * This program is free software: you can redistribute it and/or modify
-		 * it under the terms of the GNU General Public License as published by
-		 * the Free Software Foundation, either version 3 of the License, or
-		 * (at your option) any later version.
-		 *
-		 * This program is distributed in the hope that it will be useful,
-		 * but WITHOUT ANY WARRANTY; without even the implied warranty of
-		 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-		 * GNU General Public License for more details.
-		 *
-		 * You should have received a copy of the GNU General Public License
-		 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-		 */
-
-		QRious$1.use(new BrowserElementService());
-
-		return QRious$1;
-
-	})));
-
-	//# sourceMappingURL=qrious.js.map
-
-/***/ },
-/* 8 */
 /***/ function(module, exports) {
 
-	module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;
-	  return _h('div', {
-	    class: _vm.cls
-	  })
-	},staticRenderFns: []}
-
-/***/ },
-/* 9 */
-/***/ function(module, exports) {
-
-	module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;
-	  return _h('div', {
+	module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;var _c=_vm._self._c||_h;
+	  return _c('div', {
 	    staticClass: "app"
-	  }, [_h('div', {
+	  }, [_c('div', {
 	    staticClass: "form-group"
-	  }, [_h('label', {
+	  }, [_c('label', {
 	    attrs: {
 	      "for": "qrText"
 	    }
-	  }, ["Value: "]), " ", _h('input', {
+	  }, [_vm._v("Value: ")]), _vm._v(" "), _c('input', {
 	    directives: [{
 	      name: "model",
 	      rawName: "v-model",
@@ -12342,13 +8851,13 @@
 	        _vm.qrText = $event.target.value
 	      }
 	    }
-	  })]), " ", _h('div', {
+	  })]), _vm._v(" "), _c('div', {
 	    staticClass: "form-group"
-	  }, [_h('label', {
+	  }, [_c('label', {
 	    attrs: {
 	      "for": "qrSize"
 	    }
-	  }, ["Size: "]), "\n        0 ", _h('input', {
+	  }, [_vm._v("Size: ")]), _vm._v("\n        0 "), _c('input', {
 	    directives: [{
 	      name: "model",
 	      rawName: "v-model",
@@ -12369,13 +8878,13 @@
 	        _vm.qrSize = $event.target.value
 	      }
 	    }
-	  }), " 1000\n    "]), " ", _h('div', {
+	  }), _vm._v(" 1000\n    ")]), _vm._v(" "), _c('div', {
 	    staticClass: "form-group"
-	  }, [_h('label', {
+	  }, [_c('label', {
 	    attrs: {
 	      "for": "qrLevel"
 	    }
-	  }, ["Level: "]), " ", _h('select', {
+	  }, [_vm._v("Level: ")]), _vm._v(" "), _c('select', {
 	    directives: [{
 	      name: "model",
 	      rawName: "v-model",
@@ -12396,29 +8905,29 @@
 	        })[0]
 	      }
 	    }
-	  }, [_h('option', {
+	  }, [_c('option', {
 	    attrs: {
 	      "value": "L"
 	    }
-	  }, ["L"]), " ", _h('option', {
+	  }, [_vm._v("L")]), _vm._v(" "), _c('option', {
 	    attrs: {
 	      "value": "M"
 	    }
-	  }, ["M"]), " ", _h('option', {
+	  }, [_vm._v("M")]), _vm._v(" "), _c('option', {
 	    attrs: {
 	      "value": "Q"
 	    }
-	  }, ["Q"]), " ", _h('option', {
+	  }, [_vm._v("Q")]), _vm._v(" "), _c('option', {
 	    attrs: {
 	      "value": "H"
 	    }
-	  }, ["H"])])]), " ", _h('div', {
+	  }, [_vm._v("H")])])]), _vm._v(" "), _c('div', {
 	    staticClass: "form-group"
-	  }, [_h('label', {
+	  }, [_c('label', {
 	    attrs: {
 	      "for": "qrBg"
 	    }
-	  }, ["Background: "]), " ", _h('input', {
+	  }, [_vm._v("Background: ")]), _vm._v(" "), _c('input', {
 	    directives: [{
 	      name: "model",
 	      rawName: "v-model",
@@ -12439,13 +8948,13 @@
 	        _vm.qrBg = $event.target.value
 	      }
 	    }
-	  })]), " ", _h('div', {
+	  })]), _vm._v(" "), _c('div', {
 	    staticClass: "form-group"
-	  }, [_h('label', {
+	  }, [_c('label', {
 	    attrs: {
 	      "for": "qrFg"
 	    }
-	  }, ["Foreground: "]), " ", _h('input', {
+	  }, [_vm._v("Foreground: ")]), _vm._v(" "), _c('input', {
 	    directives: [{
 	      name: "model",
 	      rawName: "v-model",
@@ -12466,13 +8975,13 @@
 	        _vm.qrFg = $event.target.value
 	      }
 	    }
-	  })]), " ", _h('div', {
+	  })]), _vm._v(" "), _c('div', {
 	    staticClass: "form-group"
-	  }, [_h('label', {
+	  }, [_c('label', {
 	    attrs: {
 	      "for": "qrPadding"
 	    }
-	  }, ["Padding: "]), " ", _h('input', {
+	  }, [_vm._v("Padding: ")]), _vm._v(" "), _c('input', {
 	    directives: [{
 	      name: "model",
 	      rawName: "v-model",
@@ -12493,13 +9002,13 @@
 	        _vm.qrPadding = $event.target.value
 	      }
 	    }
-	  })]), " ", _h('div', {
+	  })]), _vm._v(" "), _c('div', {
 	    staticClass: "form-group"
-	  }, [_h('label', {
+	  }, [_c('label', {
 	    attrs: {
 	      "for": "qrMime"
 	    }
-	  }, ["MIME: "]), " ", _h('select', {
+	  }, [_vm._v("MIME: ")]), _vm._v(" "), _c('select', {
 	    directives: [{
 	      name: "model",
 	      rawName: "v-model",
@@ -12520,21 +9029,21 @@
 	        })[0]
 	      }
 	    }
-	  }, [_h('option', {
+	  }, [_c('option', {
 	    attrs: {
 	      "value": "image/png"
 	    }
-	  }, ["image/png"]), " ", _h('option', {
+	  }, [_vm._v("image/png")]), _vm._v(" "), _c('option', {
 	    attrs: {
 	      "value": "image/jpeg"
 	    }
-	  }, ["image/jpeg"])])]), " ", _h('div', {
+	  }, [_vm._v("image/jpeg")])])]), _vm._v(" "), _c('div', {
 	    staticClass: "form-group"
-	  }, [_h('label', {
+	  }, [_c('label', {
 	    attrs: {
 	      "for": "qrType"
 	    }
-	  }, ["Type: "]), " ", _h('select', {
+	  }, [_vm._v("Type: ")]), _vm._v(" "), _c('select', {
 	    directives: [{
 	      name: "model",
 	      rawName: "v-model",
@@ -12555,15 +9064,15 @@
 	        })[0]
 	      }
 	    }
-	  }, [_h('option', {
+	  }, [_c('option', {
 	    attrs: {
 	      "value": "canvas"
 	    }
-	  }, ["canvas"]), " ", _h('option', {
+	  }, [_vm._v("canvas")]), _vm._v(" "), _c('option', {
 	    attrs: {
 	      "value": "image"
 	    }
-	  }, ["image"])])]), " ", _h('qrcode', {
+	  }, [_vm._v("image")])])]), _vm._v(" "), _c('qrcode', {
 	    attrs: {
 	      "value": _vm.qrText,
 	      "size": _vm.qrSize,
@@ -12574,7 +9083,7 @@
 	      "type": _vm.qrType,
 	      "mime": _vm.qrMime
 	    }
-	  })])
+	  })], 1)
 	},staticRenderFns: []}
 
 /***/ }

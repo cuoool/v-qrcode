@@ -57,7 +57,7 @@
 </template>
 
 <script>
-import Qrcode from 'v-qrcode/src/index'
+import Qrcode from 'v-qrcode'
 
 export default {
     data () {
