@@ -2,7 +2,7 @@
 	if(typeof exports === 'object' && typeof module === 'object')
 		module.exports = factory();
 	else if(typeof define === 'function' && define.amd)
-		define("VQrcode", [], factory);
+		define([], factory);
 	else if(typeof exports === 'object')
 		exports["VQrcode"] = factory();
 	else
@@ -56,40 +56,37 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	'use strict';
 	
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.qrcode = undefined;
+	
 	var _index = __webpack_require__(1);
 	
 	var _index2 = _interopRequireDefault(_index);
 	
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 	
-	module.exports = _index2.default;
+	exports.default = _index2.default;
+	exports.qrcode = _index2.default;
 
 /***/ },
 /* 1 */
 /***/ function(module, exports, __webpack_require__) {
 
-	var __vue_exports__, __vue_options__
-	var __vue_styles__ = {}
-	
-	/* script */
-	__vue_exports__ = __webpack_require__(2)
-	
-	/* template */
-	var __vue_template__ = __webpack_require__(4)
-	__vue_options__ = __vue_exports__ = __vue_exports__ || {}
-	if (
-	  typeof __vue_exports__.default === "object" ||
-	  typeof __vue_exports__.default === "function"
-	) {
-	if (Object.keys(__vue_exports__).some(function (key) { return key !== "default" && key !== "__esModule" })) {console.error("named exports are not supported in *.vue files.")}
-	__vue_options__ = __vue_exports__ = __vue_exports__.default
-	}
-	if (typeof __vue_options__ === "function") {
-	  __vue_options__ = __vue_options__.options
-	}
-	__vue_options__.__file = "/Users/wuxiaopan/github/v-qrcode/src/index.vue"
-	__vue_options__.render = __vue_template__.render
-	__vue_options__.staticRenderFns = __vue_template__.staticRenderFns
+	var Component = __webpack_require__(2)(
+	  /* script */
+	  __webpack_require__(3),
+	  /* template */
+	  __webpack_require__(5),
+	  /* scopeId */
+	  null,
+	  /* cssModules */
+	  null
+	)
+	Component.options.__file = "/Users/wuxiaopan/github/v-qrcode/src/index.vue"
+	if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
+	if (Component.options.functional) {console.error("[vue-loader] index.vue: functional components are not supported with templates, they should use render functions.")}
 	
 	/* hot reload */
 	if (false) {(function () {
@@ -98,18 +95,70 @@ return /******/ (function(modules) { // webpackBootstrap
 	  if (!hotAPI.compatible) return
 	  module.hot.accept()
 	  if (!module.hot.data) {
-	    hotAPI.createRecord("data-v-2a6a295c", __vue_options__)
+	    hotAPI.createRecord("data-v-2a6a295c", Component.options)
 	  } else {
-	    hotAPI.reload("data-v-2a6a295c", __vue_options__)
+	    hotAPI.reload("data-v-2a6a295c", Component.options)
 	  }
 	})()}
-	if (__vue_options__.functional) {console.error("[vue-loader] index.vue: functional components are not supported and should be defined in plain js files using render functions.")}
 	
-	module.exports = __vue_exports__
+	module.exports = Component.exports
 
 
 /***/ },
 /* 2 */
+/***/ function(module, exports) {
+
+	module.exports = function normalizeComponent (
+	  rawScriptExports,
+	  compiledTemplate,
+	  scopeId,
+	  cssModules
+	) {
+	  var esModule
+	  var scriptExports = rawScriptExports = rawScriptExports || {}
+	
+	  // ES6 modules interop
+	  var type = typeof rawScriptExports.default
+	  if (type === 'object' || type === 'function') {
+	    esModule = rawScriptExports
+	    scriptExports = rawScriptExports.default
+	  }
+	
+	  // Vue.extend constructor export interop
+	  var options = typeof scriptExports === 'function'
+	    ? scriptExports.options
+	    : scriptExports
+	
+	  // render functions
+	  if (compiledTemplate) {
+	    options.render = compiledTemplate.render
+	    options.staticRenderFns = compiledTemplate.staticRenderFns
+	  }
+	
+	  // scopedId
+	  if (scopeId) {
+	    options._scopeId = scopeId
+	  }
+	
+	  // inject cssModules
+	  if (cssModules) {
+	    var computed = options.computed || (options.computed = {})
+	    Object.keys(cssModules).forEach(function (key) {
+	      var module = cssModules[key]
+	      computed[key] = function () { return module }
+	    })
+	  }
+	
+	  return {
+	    esModule: esModule,
+	    exports: scriptExports,
+	    options: options
+	  }
+	}
+
+
+/***/ },
+/* 3 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -118,7 +167,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    value: true
 	});
 	
-	var _qrious = __webpack_require__(3);
+	var _qrious = __webpack_require__(4);
 	
 	var _qrious2 = _interopRequireDefault(_qrious);
 	
@@ -126,73 +175,86 @@ return /******/ (function(modules) { // webpackBootstrap
 	
 	exports.default = {
 	    props: {
-	        value: String,
+	        value: {
+	            type: String,
+	
+	            required: true,
+	
+	            default: ''
+	        },
 	
 	        cls: {
 	            type: String,
-	            default: 'qrcode'
-	        },
 	
-	        elem: {
-	            type: String,
-	
-	            default: null,
-	
-	            validator: function validator(value) {
-	                var node = document.querySelector(value);
-	
-	                var nodeName = node && node.nodeName && node.nodeName.toLowerCase();
-	
-	                return ['img', 'canvas', null].indexOf(nodeName) > -1;
-	            }
+	            default: ''
 	        },
 	
 	        size: {
-	            type: [Number, String],
+	            type: Number,
+	
 	            default: 100
 	        },
 	
 	        level: {
 	            type: String,
-	            default: 'L'
+	
+	            default: 'L',
+	
+	            validator: function validator(l) {
+	                return ['L', 'Q', 'M', 'H'].indexOf(l) > -1;
+	            }
 	        },
 	
 	        background: {
 	            type: String,
+	
 	            default: '#fff'
 	        },
 	
 	        foreground: {
 	            type: String,
+	
 	            default: '#000'
 	        },
 	
 	        mime: {
 	            type: String,
+	
 	            default: 'image/png'
 	        },
 	
 	        padding: {
-	            type: [Number, String],
+	            type: Number,
+	
 	            default: 0
 	        },
 	
 	        type: {
 	            type: String,
-	            default: 'canvas'
+	
+	            default: 'canvas',
+	
+	            validator: function validator(t) {
+	                return ['canvas', 'image'].indexOf(t) > -1;
+	            }
 	        }
 	    },
 	
 	    methods: {
 	        render: function render() {
 	            var qr = new _qrious2.default({
-	                element: document.querySelector(this.elem),
 	                background: this.background,
+	
 	                foreground: this.foreground,
+	
 	                level: this.level,
+	
 	                mime: this.mime,
+	
 	                padding: this.padding,
+	
 	                size: this.size,
+	
 	                value: this.value
 	            });
 	
@@ -203,11 +265,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	    },
 	
 	    mounted: function mounted() {
+	        var _this = this;
+	
 	        this.render();
 	
-	        this.$watch(function () {
-	            return this.value + this.size + this.level + this.background + this.foreground + this.mime + this.padding + this.type;
-	        }, this.render);
+	        this.$options._propKeys.forEach(function (key) {
+	            return _this.$watch(key, _this.render);
+	        });
 	    }
 	}; //
 	//
@@ -215,7 +279,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	//
 
 /***/ },
-/* 3 */
+/* 4 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/*
@@ -3959,11 +4023,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	//# sourceMappingURL=qrious.js.map
 
 /***/ },
-/* 4 */
+/* 5 */
 /***/ function(module, exports, __webpack_require__) {
 
-	module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;
-	  return _h('div', {
+	module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;var _c=_vm._self._c||_h;
+	  return _c('div', {
 	    class: _vm.cls
 	  })
 	},staticRenderFns: []}

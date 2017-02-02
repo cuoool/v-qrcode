@@ -7,73 +7,82 @@ import QRious from 'qrious'
 
 export default {
     props: {
-        value: String,
-
-        cls: {
+        value: {
             type: String,
+
+            required: true,
+
             default: ''
         },
 
-        elem: {
+        cls: {
             type: String,
 
-            default: null,
-
-            validator (value) {
-                let node = document.querySelector(value)
-
-                let nodeName = node && node.nodeName && node.nodeName.toLowerCase()
-
-                return ['img', 'canvas', null].indexOf(nodeName) > -1
-            }
+            default: ''
         },
 
         size: {
-            type: [Number, String],
+            type: Number,
+
             default: 100
         },
 
         level: {
             type: String,
-            default: 'L'
+
+            default: 'L',
+
+            validator: l => ['L', 'Q', 'M', 'H'].indexOf(l) > -1
         },
 
         background: {
             type: String,
+
             default: '#fff'
         },
 
         foreground: {
             type: String,
+
             default: '#000'
         },
 
         mime: {
             type: String,
+
             default: 'image/png'
         },
 
         padding: {
-            type: [Number, String],
+            type: Number,
+
             default: 0
         },
 
         type: {
             type: String,
-            default: 'canvas'
+
+            default: 'canvas',
+
+            validator: t => ['canvas', 'image'].indexOf(t) > -1
         }
     },
 
     methods: {
         render () {
             const qr = new QRious({
-                element: document.querySelector(this.elem),
                 background: this.background,
+
                 foreground: this.foreground,
+
                 level: this.level,
+
                 mime: this.mime,
+
                 padding: this.padding,
+
                 size: this.size,
+
                 value: this.value
             });
 
@@ -86,9 +95,7 @@ export default {
     mounted () {
         this.render()
 
-        this.$watch(function () {
-            return this.value + this.size + this.level + this.background + this.foreground + this.mime + this.padding + this.type
-        }, this.render)
+        this.$options._propKeys.forEach(key => this.$watch(key, this.render))
     }
 }
 

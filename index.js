@@ -1,3 +1,5 @@
-import QRCode from './src/index.vue'
+import qrcode from './src/index.vue'
 
-module.exports = QRCode
+export default qrcode
+
+export { qrcode }

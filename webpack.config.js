@@ -8,30 +8,32 @@ module.exports = {
     },
 
     output: {
-        filename: './dist/[name].js',
+        filename: isProduction ? './dist/[name].min.js' : './dist/[name].js',
 
         library: 'VQrcode',
 
-        libraryTarget: 'umd',
-
-        umdNamedDefine: true
+        libraryTarget: 'umd'
     },
 
     module: {
         loaders: [
             {
                 test: /\.vue$/,
+
                 loader: 'vue'
             },
+
             {
                 test: /\.js$/,
+
                 exclude: /node_modules/,
+
                 loader: 'babel'
             }
         ]
     },
 
-    devtool: '#source-map',
+    devtool: isProduction ? '' : '#source-map',
 
     plugins: (function () {
         return (
@@ -42,6 +44,8 @@ module.exports = {
                         warnings: false
                     }
                 }),
+
+                new webpack.optimize.OccurenceOrderPlugin(),
 
                 new webpack.BannerPlugin('(c) ' + new Date().getFullYear() + ' wxp. All Rights Reserved')
             ]
