@@ -1,6 +1,6 @@
 {
   "name": "v-qrcode",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "a qrcode component for vue",
   "main": "dist/v-qrcode.min.js",
   "scripts": {
