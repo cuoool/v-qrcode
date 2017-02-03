@@ -6,6 +6,6 @@ new Vue({
     el: '#app',
 
     components: {
-        VQrcode: VQrcode
+        VQrcode
     }
 })

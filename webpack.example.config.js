@@ -1,11 +1,9 @@
-var webpack = require('webpack');
-
-var config = require('./webpack.config.js');
+var config = require('./webpack.config.js')
 
 config.entry = {
-    'example': './example/index.js'
-};
+    example: './example/index.js'
+}
 
-config.devtool = null;
+config.devtool = null
 
-module.exports = config;
+module.exports = config
