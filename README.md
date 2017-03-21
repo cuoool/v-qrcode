@@ -38,6 +38,16 @@ A QRCode Component For Vue 2
     }
     </script>
 
+### ES5
+
+    const Qrcode = require('v-qrcode').qrcode
+
+    module.exports = {
+        components: {
+            Qrcode
+        }
+    }
+    
 ### Browser Globals
 
 The dist folder contains `v-qrcode.js` and `v-qrcode.min.js` with all components exported in the `window.VQrcode` object.
